@@ -1,2 +1,2 @@
-# metin_tr
+# metin
 doğal dil işleme
