@@ -1,0 +1,2917 @@
+////////////////////////////////////////////
+;(function (packageFunction) {
+  /* istanbul ignore next */
+  var p = window.AmazonUIPageJS || window.P;
+  /* istanbul ignore next */
+  var attribute = p._namespace || p.attributeErrors;
+  /* istanbul ignore next */
+  var namespacedP = attribute ? attribute("VSEPlayer", "") : p;
+
+  /* istanbul ignore next */
+  if (namespacedP.guardFatal) {
+    namespacedP.guardFatal(packageFunction)(namespacedP, window);
+  } else {
+    namespacedP.execute(function () {
+      packageFunction(namespacedP, window);
+    });
+  }
+}(function(P, window, undefined){
+// BEGIN ASSET VSEPlayer - 2.0
+/////////////////////////
+// BEGIN FILE js/bundle.js
+/////////////////////////
+/*
+
+
+Full source (including license, if applicable) included below.
+*/
+(function () {
+
+    window.vseFeatures = window.vseFeatures || {};
+    const gatedP = window.gatedP || {
+        register: function (pFeatureFlag, globalFeatureFlag, action, promise, globalContext = window.vseFeatures) {
+            P.now(pFeatureFlag).execute(pFeatureFlag + '-prereg', function (feature) {
+                if (!feature && !globalContext[globalFeatureFlag]) {
+                    globalContext[globalFeatureFlag] = true;
+                    const result = promise.resolve(action(promise));
+                    result.then(function () {
+                        P.now(pFeatureFlag).execute(pFeatureFlag + '-reg', function (feature) {
+                            if (!feature) {
+                                P.log('Gated registration failed to register module!', 'ERROR', pFeatureFlag);
+                                globalContext[globalFeatureFlag] = false;
+                            }
+                        });
+                    });
+                }
+            });
+        },
+        declare: function (pFeatureFlag, globalFeatureFlag, value, globalContext = window.vseFeatures) {
+            P.now(pFeatureFlag).execute(pFeatureFlag + '-prereg', function (feature) {
+                if (!feature && !globalContext[globalFeatureFlag]) {
+                    globalContext[globalFeatureFlag] = true;
+                    P.declare(pFeatureFlag, value);
+                }
+            });
+        }
+    };
+
+    /*
+     * Copyright (c) 2019 Amazon.com, Inc. All rights reserved.
+     */
+    const auiUtils = {
+        /**
+         * Replace previous page state, which may be non-existent or old and stale (especially in case of Twister refresh)
+         * with latest page state, parsed from DOM, and return it
+         * @param A
+         * @param pageStateName
+         */
+        fetchLatestPageState: (A, pageStateName) => {
+            A.state.replace(pageStateName, JSON.parse(A.$(`script[type='a-state'][data-a-state*=${pageStateName}]`).html()));
+            return A.state(pageStateName);
+        },
+        /**
+         * checks undefined and null.
+         * @param {object} obj
+         * @returns {boolean} true if it is not undefined and null.
+         */
+        isDefined: (obj) => {
+            return typeof obj !== "undefined" && obj !== null;
+        },
+    };
+
+    /*
+     * Copyright (c) 2018 Amazon.com, Inc. All rights reserved.
+     */
+    function emitDebugPayload(metricPayload) {
+        if (!window.URLSearchParams) {
+            return;
+        }
+        let urlParams = new window.URLSearchParams(window.location.search);
+        if (urlParams.get('iveDebug') === '1') {
+            if (window.DistributionMetricsDebugInfo) {
+                window.DistributionMetricsDebugInfo.push(metricPayload);
+            }
+            else {
+                window.DistributionMetricsDebugInfo = [metricPayload];
+            }
+        }
+    }
+    const postMetric = {
+        count: function (metricName, value) {
+            const ue = window.ue;
+            if (ue) {
+                metricName = `vse:csm:${metricName}`;
+                ue.count(metricName, value);
+            }
+        },
+        /**
+        metricPayload structure should be : { events: [{data: metricsData}] }
+        **/
+        emitNexusMetric: function (metricPayload, producerId, schemaId, isInternal = false) {
+            if (window.ue && window.ue.event && metricPayload && metricPayload.events && metricPayload.events[0] && metricPayload.events[0].data) {
+                window.ue.event(metricPayload.events[0].data, producerId, schemaId);
+                if (isInternal) {
+                    emitDebugPayload(metricPayload.events[0].data);
+                }
+            }
+        },
+        emitSushiMetric: function (metricPayload, isInternal = false, sushiEndPoint, retryCount) {
+            sushiEndPoint = sushiEndPoint || "https://unagi-na.amazon.com/1/events/com.amazon.eel.vse.metricstest.nexus";
+            const retryLimit = 3;
+            retryCount = retryCount || 0;
+            if (retryCount >= retryLimit) {
+                return;
+            }
+            /*
+              remove '\' being added after stringify
+              e.g. payload => {"json_payload":{"isMshop":false,"title":"some test title with "quote""}}
+              JSON.stringify(payload) => {"json_payload":{"isMshop":false,"title":"some test title with \"quote\""}}
+            */
+            const sushiPayload = JSON.stringify(metricPayload).replace(/\\\\/g, "");
+            const options = {
+                params: sushiPayload,
+                paramsFormat: 'json',
+                contentType: 'application/json; charset=utf-8',
+                error: () => {
+                    this.emitSushiMetric(metricPayload, isInternal, sushiEndPoint, retryCount + 1);
+                }
+            };
+            /*
+              noted in https://sage.amazon.com/posts/468046, iOS ~11 and up, iOS is no longer
+              granting apps certain permissions by default, so sendBeacon is restricted even
+              though it is supported
+            */
+            const isIphone = navigator.userAgent.match(new RegExp('iPhone', 'i'));
+            let isMshop = false;
+            P.now('mash').execute('vse-detect-mshop', () => {
+                isMshop = true;
+            });
+            const isIphoneMshop = (isIphone !== null) && isMshop;
+            P.when('A').execute('Emit-VSE-Metrics', (A) => {
+                if (navigator && navigator.sendBeacon && !isIphoneMshop) {
+                    navigator.sendBeacon(sushiEndPoint, sushiPayload);
+                }
+                else {
+                    A.post(sushiEndPoint, options);
+                }
+            });
+            if (isInternal) {
+                emitDebugPayload(metricPayload);
+            }
+        },
+        logFatal: (attribution, message, exception) => {
+            if (window.ueLogError) {
+                const additionalInfo = {
+                    logLevel: 'FATAL',
+                    attribution: attribution,
+                    message: message
+                };
+                window.ueLogError(exception, additionalInfo);
+            }
+        },
+        logError: (attribution, message, exception) => {
+            if (window.ueLogError) {
+                const additionalInfo = {
+                    logLevel: 'ERROR',
+                    attribution: attribution,
+                    message: message
+                };
+                window.ueLogError(exception, additionalInfo);
+            }
+        }
+    };
+
+    function guid() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    /*
+     * Copyright (c) 2019 Amazon.com, Inc. All rights reserved.
+     */
+    const metricUtils = {
+        /**
+         * Utility for the first stage of universal Sushi reporting.  Makes an application-level function which can be used
+         * to build sushi payloads for more granular event metrics
+         * @param {AUIAStatic} A
+         * @param {ISushiMetricsConfig} config
+         * @returns {any} function accepting 'metricData' and returning a payload.  metricData is essentially a
+         *                ISushiMetricsConfig where every parameter is optional.  If provided, will override defaults below
+         */
+        makeApplicationSushiPayloadBuilder: (A, config) => {
+            return (metricData) => {
+                let payloadTemplate = {
+                    eventSource: config.eventSource,
+                    requestId: config.requestId,
+                    sessionId: config.sessionId,
+                    placementContext: config.placementContext,
+                    creativeId: config.creativeId || '', // Set for creative id from content symphony
+                    marketplaceId: config.marketplaceId,
+                    weblabIds: config.weblabIds,
+                    clientId: config.clientId,
+                    // downstream expects booleans to be strings
+                    isInternal: config.isInternal.toString(),
+                    isRobot: config.isRobot.toString(),
+                    pageAsin: config.pageAsin,
+                    customerId: config.customerId,
+                    sessionType: config.sessionType || 1, // Dummy value unless overridden by caller
+                    refMarkers: config.refMarkers,
+                    eventId: guid(),
+                    timestamp: new Date(),
+                    userAgentData: navigator.userAgent,
+                    titleSessionId: 0,
+                    videoAsin: 0,
+                    pageUrl: window.location.href !== null ? window.location.href.substring(0, 500) : '',
+                    videoAsinList: config.videoAsinList || "",
+                    rankingStrategy: ""
+                };
+                let payload = A.$.extend(payloadTemplate, metricData);
+                const requestPayload = {
+                    events: [{
+                            data: payload,
+                        }]
+                };
+                return requestPayload;
+            };
+        },
+        makeApplicationNexusPayloadBuilder: (A, config) => {
+            return (metricData) => {
+                let payloadTemplate = {
+                    eventSource: config.eventSource,
+                    placementContext: config.placementContext,
+                    userAgentData: navigator.userAgent,
+                    videoAsin: config.videoAsin || "",
+                    pageAsin: config.pageAsin || "",
+                    videoAsinList: config.videoAsinList || "",
+                    titleSessionId: "0",
+                    stringPayload: "",
+                    intPayload: 1,
+                    rankingStrategy: "",
+                    creativeId: config.creativeId || '', // Set for creative id from content symphony
+                    clientId: config.clientId,
+                    pageUrl: window.location.href !== null ? window.location.href.substring(0, 500) : '',
+                    customerId: config.customerId || ''
+                };
+                return { events: [{ data: A.$.extend(payloadTemplate, metricData) }] };
+            };
+        },
+        makeClickstreamNexusPayloadBuilder: (A, config) => {
+            return (metricData) => {
+                let payloadTemplate = {
+                    timestamp: new Date(),
+                    actionType: config.actionType,
+                    eventOwner: config.producerId,
+                    eventType: config.eventType,
+                    productId: config.productId
+                };
+                return A.$.extend(payloadTemplate, metricData);
+            };
+        },
+        extendWithNewField: (payloadTemplate, field, value) => {
+            if (payloadTemplate && payloadTemplate.events && payloadTemplate.events[0] && payloadTemplate.events[0].data) {
+                let data = payloadTemplate.events[0].data;
+                data[field] = value;
+                return {
+                    events: [{
+                            data: data
+                        }]
+                };
+            }
+            return payloadTemplate;
+        },
+    };
+
+    class InvalidArgumentsException {
+        constructor(message) {
+            this.message = message;
+        }
+    }
+
+    class RefTagRecorder {
+        constructor(A, config = { refTagRecorderEndPoint: "/gp/mobile/tag/?", retryLimit: 3 }) {
+            this.A = A;
+            this.config = config;
+        }
+        emitRefTag(refTag, retryCount = 0) {
+            if (retryCount >= this.config.retryLimit) {
+                return;
+            }
+            //Values for below query parameters will be fetched dynamically in next iterations.
+            const url = `${this.config.refTagRecorderEndPoint}ref=${refTag}`;
+            const self = this;
+            this.A.get(url, {
+                error: () => {
+                    self.emitRefTag(refTag, retryCount + 1);
+                }
+            });
+        }
+    }
+
+    const closedCaptionsUtils = {
+        /**
+         * Converts closed captions string (example: "en,https//:ccUrl.vtt") to the list
+         * @param A AUI
+         * @param closedCaptionsString closed captions string
+         * @return collection of IClosedCaptions
+         */
+        getClosedCaptions: (A, closedCaptionsString) => {
+            const closedCaptions = [];
+            if (!A.objectIsEmpty(closedCaptionsString)) {
+                const data = closedCaptionsString.split(',');
+                for (let i = 0; i < data.length; i += 2) {
+                    if (data[i + 1] !== undefined) {
+                        closedCaptions.push({ locale: data[i], url: data[i + 1] });
+                    }
+                }
+            }
+            return closedCaptions;
+        }
+    };
+
+    /**
+     * This class publishes events using Client Side Analytics (CSA)
+     * through LuCID (Lucid Customer Interaction Data).
+     * Details https://info.analytics.a2z.com/#/docs/data_collection/csa/instrumentation_standards
+     */
+    class CsaLogging {
+        constructor(config) {
+            this.config = config;
+            this.log = (eventPayload) => {
+                if (this.videoEvent) {
+                    // basePayload.parentElementId should be updated dynamically because there is race
+                    // condition when data-csa-c-id might not exist on Lightbox/IVX causing other element
+                    // on the page being picked up instead of Lightbox/IVX
+                    var closestElementWithDataCsaCId = this.$container.closest("[data-csa-c-id]");
+                    if (closestElementWithDataCsaCId.length > 0) {
+                        this.basePayload.parentElementId = closestElementWithDataCsaCId.data("csa-c-id");
+                        this.videoEvent("setEntity", {
+                            video: Object.assign({}, this.basePayload, eventPayload)
+                        });
+                        // NOTE: Required page context will be logged only if *{ent: 'all'}* is set.
+                        this.videoEvent("log", { schemaId: this.schemaId }, { ent: 'all' });
+                    }
+                    else {
+                        if (window.ue) {
+                            window.ue.count(CsaLogging.CANNOT_FIND_CSA_WIDGET, 1);
+                            postMetric.logError("ive-lucid-video-events", `Cannot find CSA widget, container id: ${this.$container.attr('id')}, eventPayload: ${JSON.stringify(eventPayload)}`, `Cannot find CSA widget, container id: ${this.$container.attr('id')}, eventPayload: ${JSON.stringify(eventPayload)}`);
+                        }
+                    }
+                }
+                else {
+                    postMetric.count('ive:csa:cannotCreateVideoEvent:noVideoEvent', 1);
+                }
+            };
+            this.schemaId = config.schemaId;
+            this.$container = config.$container;
+            // Data that will not change for all events for a given page load:
+            this.basePayload = {
+                player: "Brila",
+                parentElementId: ""
+            };
+            if (window.csa) {
+                this.videoEvent = window.csa("Events", { producerId: config.producerId,
+                    lob: window.ue_lob ? window.ue_lob : ""
+                });
+            }
+            else {
+                postMetric.count('ive:csa:cannotCreateVideoEvent:noCsaAvailable', 1);
+            }
+        }
+    }
+    CsaLogging.CANNOT_FIND_CSA_WIDGET = 'ive-cannot-find-csa-widget';
+
+    /**
+     * This class holds logic to emit OnSite Attribution events related to video viewing session through CSA library.
+     */
+    class OnSiteAttributionMetrics {
+        constructor(config, player, A, isIvx, clientPrefix) {
+            this.player = player;
+            this.A = A;
+            this.isIvx = isIvx;
+            this.clientPrefix = clientPrefix;
+            this.initialLoggingDelay = 0; // 2 secs delay since video started. Triggered once per video view
+            this.loggingInterval = 0; // interval timer, triggered every 30 secs during one video view
+            this.lastLoggedEventInterval = 0; //Runs every 1 second to track how many seconds has passed since last logged CSA event
+            this.secondsFromLastEvent = 0; //The number of seconds that have passed since last logged CSA event
+            this.aciContentId = ""; // contentId of currently playing video in ACI format
+            /**
+             * If client has Lightbox Carousel - log final event for previous video on click of new thumbnail.
+             * */
+            this.emitCarouselClickEvent = () => {
+                this.logCSAEvent(this.secondsFromLastEvent, "ENDED");
+                this.isAutoplay = false;
+            };
+            this.attachPlayerEventListeners = () => {
+                this.player.on('playbackStart', this._playbackStartHandler);
+                this.player.on('playbackComplete', this._playbackCompleteHandler);
+                this.player.on('fullscreenchange', this._playerModeChangeHandler);
+                this.player.on('pause', this._playbackPauseHandler);
+                this.player.on('mute', this._playbackMuteHandler);
+                this.player.on('unmute', this._playbackUnmuteHandler);
+                this.player.on('enableClosedCaptions', this._playbackEnableClosedCaptionsHandler);
+                this.player.on('disableClosedCaptions', this._playbackDisableClosedCaptionsHandler);
+                // Setting isAutoplay to true in case of continuous play
+                this.A.on(`vse:${this.clientPrefix}:player:continuous:play`, () => {
+                    this.isAutoplay = true;
+                });
+                // Reset isAutoplay on Lightbox close
+                this.A.on(`vse:${this.clientPrefix}:page:lightBoxClosed`, () => {
+                    this.isAutoplay = false;
+                });
+            };
+            /**
+             * Triggered when video starts playing, including resume.
+             * */
+            this._playbackStartHandler = () => {
+                this.aciContentId = this.getCurrentACIContentId();
+                this.logCSAEvent(this.secondsFromLastEvent, "PLAYING");
+                postMetric.count(`${this.clientPrefix}:csa:startPlaying`, 1);
+                //Reset timers when video starts or when video resumes:
+                this.removeCSAEventHandler();
+                this.addCSAEventHandler();
+            };
+            /**
+             * Triggered when video finishes, including when user selects a new video.
+             * */
+            this._playbackCompleteHandler = () => {
+                this.logCSAEvent(this.secondsFromLastEvent, "ENDED");
+                this.removeCSAEventHandler();
+            };
+            /**
+             * When player mode changes, log final metric for previous mode and reset timer.
+             * */
+            this._playerModeChangeHandler = () => {
+                // Log final metric with previous mode
+                this.logCSAEvent(this.secondsFromLastEvent, "MODE_CHANGED", this.currentPlayerMode);
+                // Reset 2 sec and 30 sec timers
+                this.removeCSAEventHandler();
+                this.addCSAEventHandler();
+            };
+            /**
+             * When video is paused, log final event and reset timer.
+             * */
+            this._playbackPauseHandler = () => {
+                this.logCSAEvent(this.secondsFromLastEvent, "STOPPED");
+                this.removeCSAEventHandler();
+            };
+            /**
+             * When video is muted, log final event and reset timer.
+             * */
+            this._playbackMuteHandler = () => {
+                this.logCSAEvent(this.secondsFromLastEvent, "MUTED");
+                this.removeCSAEventHandler();
+                this.addCSAEventHandler();
+            };
+            /**
+             * When video is unmuted, log final event and reset timer.
+             * */
+            this._playbackUnmuteHandler = () => {
+                this.logCSAEvent(this.secondsFromLastEvent, "UNMUTED");
+                this.removeCSAEventHandler();
+                this.addCSAEventHandler();
+            };
+            /**
+             * When closed captions is enabled, log final event and reset timer.
+             * */
+            this._playbackEnableClosedCaptionsHandler = () => {
+                this.logCSAEvent(this.secondsFromLastEvent, "CAPTIONS_ON");
+                this.removeCSAEventHandler();
+                this.addCSAEventHandler();
+            };
+            /**
+             * When closed captions is disabled, log final event and reset timer.
+             * */
+            this._playbackDisableClosedCaptionsHandler = () => {
+                this.logCSAEvent(this.secondsFromLastEvent, "CAPTIONS_OFF");
+                this.removeCSAEventHandler();
+                this.addCSAEventHandler();
+            };
+            /**
+             * Set up CSA event handler. First event should be emitted 2 secs after video starts playing.
+             * After that, it should emit event with 30 secs intervals.
+             * */
+            this.addCSAEventHandler = () => {
+                // Track how many seconds has passed since last logged event:
+                this.lastLoggedEventInterval = this.A.interval(() => {
+                    this.secondsFromLastEvent++;
+                }, OnSiteAttributionMetrics.TIMERS.TIME_FROM_LAST_EVENT_MS);
+                const initialLoggingDelay = () => {
+                    this.logCSAEvent(this.secondsFromLastEvent, "PLAYING");
+                    const loggingInterval = () => {
+                        this.logCSAEvent(this.secondsFromLastEvent, "NONE");
+                    };
+                    // Triggers every 30 secs after 2 secs of video has played:
+                    this.loggingInterval = this.A.interval(loggingInterval, OnSiteAttributionMetrics.TIMERS.SUBSEQUENT_INTERVAL_MS);
+                };
+                // Triggers once after 2 secs of video has played:
+                this.initialLoggingDelay = this.A.delay(initialLoggingDelay, OnSiteAttributionMetrics.TIMERS.INITIAL_DELAY_MS);
+            };
+            /**
+             * Reset all intervals and timers.
+             * */
+            this.removeCSAEventHandler = () => {
+                clearInterval(this.lastLoggedEventInterval);
+                clearInterval(this.loggingInterval);
+                clearTimeout(this.initialLoggingDelay);
+                this.secondsFromLastEvent = 0;
+                this.loggingInterval = 0;
+                this.initialLoggingDelay = 0;
+            };
+            /**
+             * Log individual CSA event with additional video player states metadata.
+             * @param viewDurationDeltaSec seconds since last logged event.
+             * @param eventName
+             * @param playerMode optional ICSALoggingPlayerMode
+             * */
+            this.logCSAEvent = (viewDurationDeltaSec, eventName, playerMode) => {
+                if (this.aciContentId !== "") {
+                    this.currentPlayerMode = this.getCurrentPlayerMode();
+                    const eventPayload = {
+                        contentId: this.aciContentId,
+                        viewDuration: viewDurationDeltaSec.toString(),
+                        playerMode: playerMode || this.currentPlayerMode,
+                        isAutoPlayed: this.isAutoplay.toString(),
+                        isCaptionOn: this.player.isCaptionOn().toString(),
+                        isAudioOn: (!this.player.isMuted()).toString(),
+                        videoRequestId: this.player.getTitleSessionId().toString(),
+                        eventName: eventName
+                    };
+                    this.csa.log(eventPayload);
+                    this.secondsFromLastEvent = 0;
+                }
+                else {
+                    postMetric.count(`${this.clientPrefix}:csa:noContentIdPresented`, 1);
+                }
+            };
+            this.csa = new CsaLogging(config);
+            this.player = player;
+            this.currentPlayerMode = this.getCurrentPlayerMode();
+            this.isAutoplay = this.player.isAutoplayed();
+            this.attachPlayerEventListeners();
+        }
+        ;
+        getCurrentPlayerMode() {
+            // For now, we support only 3 modes, this might be expanded in future
+            return this.isIvx ? "IMMERSIVE_VIEW" : this.player.isFullscreen() ? "FULL_SCREEN" : "MODAL";
+        }
+        getCurrentACIContentId() {
+            return this.player.getCurrent().aciContentId || "";
+        }
+    }
+    OnSiteAttributionMetrics.TIMERS = {
+        INITIAL_DELAY_MS: 2000,
+        SUBSEQUENT_INTERVAL_MS: 30000,
+        TIME_FROM_LAST_EVENT_MS: 1000
+    };
+
+    const nonAiryEvents = {
+        'queueComplete': true
+    };
+    class VSEPlayer {
+        constructor(player, frame, libs) {
+            this.player = player;
+            this.frame = frame;
+            this.assets = [];
+            this.currentIndex = 0;
+            this.eventEmitter = new libs.EventEmitter();
+            this.player.on('playbackComplete', () => {
+                this.currentIndex++;
+                this.doPlay();
+            });
+        }
+        play(asset) {
+            if (asset) {
+                this.player.play(asset);
+            }
+            else {
+                this.player.play();
+            }
+            return this;
+        }
+        emitStartCountMetric() {
+            this.player.emitStartCountMetric();
+            return this;
+        }
+        emitScrubberClick() {
+            this.player.emitScrubberClick();
+            return this;
+        }
+        emitSkipForwardClick() {
+            this.player.emitSkipForwardClick();
+            return this;
+        }
+        emitSkipBackwardClick() {
+            this.player.emitSkipBackwardClick();
+            return this;
+        }
+        getCurrentTime() {
+            return this.player.getCurrentTime();
+        }
+        setCurrentTime(seekTime) {
+            this.player.setCurrentTime(seekTime);
+            return this;
+        }
+        getMediaDuration() {
+            return this.player.getMediaDuration();
+        }
+        mute(source) {
+            this.player.mute(source);
+            return this;
+        }
+        unmute() {
+            this.player.unmute();
+            return this;
+        }
+        isMuted() {
+            return this.player.isMuted();
+        }
+        resume(eventTimestamp) {
+            this.player.resume(eventTimestamp);
+            return this;
+        }
+        pause(source) {
+            this.player.pause(source);
+            return this;
+        }
+        next() {
+            this.player.stop();
+            this.currentIndex++;
+            this.doPlay();
+            return this;
+        }
+        previous() {
+            this.player.stop();
+            this.currentIndex--;
+            this.doPlay();
+            return this;
+        }
+        seek(time) {
+            this.player.seek(time);
+            return this;
+        }
+        enqueue(asset, position = this.assets.length) {
+            if (asset instanceof Array) {
+                const args = asset.slice();
+                args.splice(0, 0, this.assets);
+                Array.prototype.splice.apply(this.assets, args);
+            }
+            else {
+                this.assets.splice(position, 0, asset);
+            }
+            return this;
+        }
+        dequeue(asset) {
+            let idx;
+            if (typeof asset === 'number') {
+                idx = [asset];
+            }
+            else if (asset instanceof Array) {
+                let contentIds = asset.map(function (a) { return a.contentId; });
+                idx = this.assets.map(function (a) { return contentIds.indexOf(a.contentId); })
+                    .filter(function (idx) { });
+            }
+            else {
+                idx = [this.assets.map(function (a, i) { return i; })
+                        .filter((idx) => { this.assets[idx].contentId == asset.contentId; })[0]];
+            }
+            for (let i = 0, l = idx.length; i < l; i++) {
+                this.assets.splice(idx[i], 1);
+            }
+            return this;
+        }
+        on(playerEvent, callback) {
+            if (nonAiryEvents.hasOwnProperty(playerEvent))
+                this.eventEmitter.on(playerEvent, callback);
+            else
+                this.player.on(playerEvent, callback);
+            return this;
+        }
+        off(playerEvent, callback) {
+            if (nonAiryEvents.hasOwnProperty(playerEvent))
+                this.eventEmitter.off(playerEvent, callback);
+            else
+                this.player.off(playerEvent, callback);
+            return this;
+        }
+        ready(callback) {
+            this.player.ready(callback);
+            return this;
+        }
+        readyState() {
+            return this.player.readyState();
+        }
+        load() {
+            this.player.load();
+            return this;
+        }
+        getAssets() {
+            return this.assets;
+        }
+        getCurrentAssetIndex() {
+            return this.currentIndex - 1;
+        }
+        getPosition() {
+            return this.player.getPosition();
+        }
+        isPlaying() {
+            return this.player.isPlaying();
+        }
+        isPaused() {
+            return this.player.isPaused();
+        }
+        getVersion() {
+            return this.player.getVersion();
+        }
+        destroy() {
+            this.player.destroy();
+        }
+        addChild(child, object) {
+            this.player.addChild(child, object);
+            return this;
+        }
+        removeChild(child) {
+            this.player.removeChild(child);
+            return this;
+        }
+        loadNextVideoPoster(posterImage) {
+            this.player.loadNextVideoPoster(posterImage);
+            return this;
+        }
+        blur() {
+            this.player.blur();
+            return this;
+        }
+        requestFullscreen() {
+            this.player.requestFullscreen();
+            return this;
+        }
+        exitFullscreen() {
+            this.player.exitFullscreen();
+            return this;
+        }
+        isFullscreen() {
+            return this.player.isFullscreen();
+        }
+        fluid(isResponsivePlayer) {
+            this.player.fluid(isResponsivePlayer);
+            return this;
+        }
+        aspectRatio(ratio) {
+            this.player.aspectRatio(ratio);
+            return this;
+        }
+        enableCurrentTextTrack(language = "en") {
+            this.player.enableCurrentTextTrack(language);
+            return this;
+        }
+        disableCurrentTextTrack(language = "en") {
+            this.player.disableCurrentTextTrack(language);
+            return this;
+        }
+        updateTextTrack(closedCaptions) {
+            this.player.updateTextTrack(closedCaptions);
+            return this;
+        }
+        removeCurrentTextTracks() {
+            this.player.removeCurrentTextTracks();
+            return this;
+        }
+        setInitialData(asset) {
+            var playerContainers = document.getElementsByClassName('vse-player-container');
+            this.player.setInitialData(asset);
+            if (asset && asset.aciContentId && playerContainers.length > 0 && (playerContainers[0].hasAttribute('data-csa-c-content-id') || playerContainers[0].getAttribute('data-csa-c-content-id') === '')) {
+                playerContainers[0].setAttribute('data-csa-c-content-id', asset.aciContentId);
+            }
+            return this;
+        }
+        showPoster(imageUrl) {
+            this.player.showPoster(imageUrl);
+            return this;
+        }
+        getCurrent() {
+            return this.player.getCurrent();
+        }
+        isCaptionOn() {
+            return this.player.isCaptionOn();
+        }
+        isAutoplayed() {
+            return this.player.isAutoplayed();
+        }
+        getTitleSessionId() {
+            return this.player.getTitleSessionId();
+        }
+        requestPictureInPicture() {
+            this.player.requestPictureInPicture();
+            return this;
+        }
+        exitPictureInPicture() {
+            this.player.exitPictureInPicture();
+            return this;
+        }
+        setPlayerMode(playerMode) {
+            this.player.setPlayerMode(playerMode);
+            return this;
+        }
+        doPlay() {
+            const playerAsset = this.player.getCurrent();
+            if (playerAsset && this.assets[this.currentIndex]) {
+                if (this.assets[this.currentIndex].contentId == playerAsset.contentId) {
+                    this.player.play();
+                }
+                else {
+                    this.player.play(this.assets[this.currentIndex]);
+                }
+            }
+            else if (this.assets[this.currentIndex]) {
+                this.player.play(this.assets[this.currentIndex]);
+            }
+        }
+    }
+
+    class BasicComponents {
+        constructor(config, playerShim) {
+            this.mouseOverVideoPlayer = false;
+            this.isReportWidgetClosed = false;
+            this.isMshop = false;
+            this.DISCLOSURE_SELECTOR = '.ive-video-disclosure-container-wrapper';
+            this.INFLUENCER_DISCLOSURE_SELECTOR = '.ive-aip-link';
+            this.PUBLISHER_DISCLOSURE_SELECTOR = '.ive-osp-link';
+            this.HIDDEN_CSS_CLASS = 'aok-hidden';
+            this.REPORT_COPYRIGHT_SELECTOR = '.vse-fb-copyright';
+            this.REPORT_SHOWN_METRIC = 'ive:player:report:shown';
+            this.REPORT_SUBMITTED_METRIC = 'ive:player:report:submit';
+            this.REPORT_HIDDEN_METRIC = 'ive:player:report:hidden';
+            /**
+             * Updates report and disclosure components when new video plays.
+             */
+            this.update = (assetSpec) => {
+                if (this.report) {
+                    this.report.setActiveVideoAndSource(assetSpec.contentId, assetSpec.vendorCode, assetSpec.aciContentId);
+                }
+                if (this.config.includeEarnsComissionDisclosure === true && this.$disclosureContainer) {
+                    const $disclosureInfluencerLink = this.$disclosureContainer.find(this.INFLUENCER_DISCLOSURE_SELECTOR);
+                    const $disclosurePublisherLink = this.$disclosureContainer.find(this.PUBLISHER_DISCLOSURE_SELECTOR);
+                    const isInfluencerVideo = assetSpec.creatorType === 'Influencer';
+                    const is3PVideo = assetSpec.creatorType === '3P';
+                    $disclosureInfluencerLink.toggleClass(this.HIDDEN_CSS_CLASS, !isInfluencerVideo);
+                    $disclosurePublisherLink.toggleClass(this.HIDDEN_CSS_CLASS, isInfluencerVideo);
+                    this.$disclosureContainer.toggleClass(this.HIDDEN_CSS_CLASS, !(isInfluencerVideo || is3PVideo));
+                }
+            };
+            /**
+             * Destroys components when player is destroyed.
+             */
+            this.destroy = () => {
+                if (this.report) {
+                    this.$reportContainer.remove();
+                }
+                if (this.$disclosureContainer) {
+                    this.$disclosureContainer.remove();
+                }
+            };
+            this.deRegisterReport = () => {
+                this.A.off(`vse:${this.reportId}:feedback:shown`);
+                this.A.off(`vse:${this.reportId}:feedback:hidden`);
+                this.A.off(`vse:${this.reportId}:feedback:submitted:success`);
+            };
+            this.addReportHandlers = () => {
+                this.A.on(`vse:${this.reportId}:feedback:shown`, () => {
+                    postMetric.count(this.REPORT_SHOWN_METRIC, 1);
+                    if (this.playerShim && this.playerShim.isPlaying()) {
+                        this.playerShim.pause();
+                    }
+                    this.isReportWidgetClosed = false;
+                    this.$reportContainer.find(this.REPORT_COPYRIGHT_SELECTOR).click((event) => {
+                        if (this.isMshop) {
+                            event.preventDefault();
+                            this.report.showInfringementNotSupport();
+                        }
+                    });
+                });
+                this.A.on(`vse:${this.reportId}:feedback:hidden`, () => {
+                    postMetric.count(this.REPORT_HIDDEN_METRIC, 1);
+                    this.isReportWidgetClosed = true;
+                    if (!this.mouseOverVideoPlayer) {
+                        this.hideReportWidget();
+                    }
+                    this.$reportContainer.find(this.REPORT_COPYRIGHT_SELECTOR).unbind('click');
+                });
+                this.A.on(`vse:${this.reportId}:feedback:submitted:success`, () => {
+                    postMetric.count(this.REPORT_SUBMITTED_METRIC, 1);
+                });
+            };
+            this.showReportWidget = () => {
+                this.$reportContainer.css({ display: 'inline-block' });
+                this.toggleDimVideoPlayer(true);
+            };
+            this.hideReportWidget = () => {
+                this.$reportContainer.css({ display: 'none' });
+                this.toggleDimVideoPlayer(false);
+            };
+            this.toggleDimVideoPlayer = (add) => {
+                this.$playerContainer.find('video').toggleClass('dim-video-player', add);
+            };
+            this.mouseLeaveHandler = () => {
+                if (this.isReportWidgetClosed) {
+                    this.hideReportWidget();
+                }
+                this.mouseOverVideoPlayer = false;
+            };
+            this.config = config;
+            this.playerShim = playerShim;
+        }
+        ;
+        initialize(assetSpec) {
+            P.when('A', 'a-button', 'ready').execute('IVECreateBasicComponentsForPlayer', (A, buttonApi) => {
+                this.A = A;
+                this.isMshop = A.capabilities.mobile && A.capabilities.isAmazonApp;
+                this.$playerContainer = this.A.$(`#${this.config.parentId}`);
+                this.deRegisterReport();
+                const reportPageState = A.state(this.config.reportPageStateName);
+                this.reportId = reportPageState.id;
+                const feedbackFactory = new this.config.feedbackFactory({ A: A, buttonApi: buttonApi });
+                this.report = feedbackFactory.create(this.reportId, this.config.reportPageStateName, false);
+                this.addReportHandlers();
+                this.$disclosureContainer = this.$playerContainer.parent().find(this.DISCLOSURE_SELECTOR);
+                this.$playerContainer.append(this.$disclosureContainer);
+                this.update(assetSpec);
+                this.$reportContainer = this.$playerContainer.parent().find(`.ive-${this.config.clientPrefix}-report-container`);
+                this.isReportWidgetClosed = true;
+                this.$reportContainer.removeClass(this.HIDDEN_CSS_CLASS);
+                this.$playerContainer.append(this.$reportContainer);
+                const playerOverlayUniqueEventName = `report-overlays-player-${this.reportId}`;
+                this.A.declarative.create(this.$playerContainer, playerOverlayUniqueEventName, {});
+                this.A.declarative(playerOverlayUniqueEventName, 'mouseenter touchstart focus', () => {
+                    if (this.isReportWidgetClosed) {
+                        this.showReportWidget();
+                    }
+                    this.mouseOverVideoPlayer = true;
+                    if (this.A.capabilities.touch) {
+                        //Hide the overlay on Player 3 seconds after mouse enter event.
+                        //TT: https://tt.amazon.com/0539972838
+                        this.A.delay(this.mouseLeaveHandler, 3000);
+                    }
+                });
+                this.A.declarative(playerOverlayUniqueEventName, 'mouseleave', this.mouseLeaveHandler);
+            });
+        }
+    }
+
+    class BrilaShim {
+        constructor(brilaFactory, config, initialVideo, libs) {
+            this.config = config;
+            this.libs = libs;
+            this.VSE_CC_KEY = "vse_brila_cc_status";
+            this.lastFrameTime = 0;
+            this.DRAW_DELAY_IN_MS = 20;
+            this.registerEventsForLazyBlur = (videoElement, canvasRef) => {
+                if (!canvasRef || !videoElement)
+                    return;
+                this.videoJS.on('timeupdate', () => {
+                    setTimeout(() => {
+                        this.draw(canvasRef.getContext('2d', { alpha: false }), videoElement, this.getCurrentTime());
+                    }, 100);
+                });
+            };
+            this.draw = (canvas, videoElement, timestamp = 0) => {
+                let deltaBetweenLastDraw = Math.abs(timestamp - this.lastFrameTime);
+                if (canvas === null || videoElement === null || !this.isPlaying() || performance === undefined)
+                    return false;
+                const currentTime = performance.now();
+                if (currentTime - this.lastFrameTime >= this.DRAW_DELAY_IN_MS) {
+                    this.drawCover(canvas, videoElement, deltaBetweenLastDraw, timestamp);
+                    this.lastFrameTime = currentTime;
+                }
+                window.requestAnimationFrame(() => {
+                    this.draw(canvas, videoElement, timestamp);
+                });
+            };
+            this.drawCover = (context, videoElement, deltaBetweenLastDraw, timestamp) => {
+                this.lastFrameTime = timestamp;
+                if (!context)
+                    return;
+                // Set canvas dimensions to client dimensions
+                context.canvas.width = context.canvas.clientWidth;
+                context.canvas.height = context.canvas.clientHeight;
+                const canvasWidth = context.canvas.width;
+                const canvasHeight = context.canvas.height;
+                // Get video dimensions
+                const videoWidth = videoElement.videoWidth;
+                const videoHeight = videoElement.videoHeight;
+                // Calculate scaling ratios
+                const scaleX = canvasWidth / videoWidth;
+                const scaleY = canvasHeight / videoHeight;
+                const scale = Math.max(scaleX, scaleY);
+                // Calculate dimensions to maintain aspect ratio while covering
+                const scaledWidth = videoWidth * scale;
+                const scaledHeight = videoHeight * scale;
+                // Calculate positioning to center the video
+                const x = (canvasWidth - scaledWidth) / 2;
+                const y = (canvasHeight - scaledHeight) / 2;
+                context.imageSmoothingEnabled = false;
+                context.drawImage(videoElement, x, y, scaledWidth, scaledHeight);
+            };
+            this.encodeForHtml = (input) => {
+                return input
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#39;");
+            };
+            this.eventEmitter = new libs.EventEmitter();
+            this.currentAsset = initialVideo;
+            this.localStorageEnabled = this.testLocalStorage();
+            this.initHandlers();
+            this.parentContainerId = config.parentId + '-element';
+            this.altTextElement = this.createAltTextElement(config.parentId);
+            let parentElement;
+            if (!config.isReactFactory) {
+                // VideoJS needs an existing video element for instantiation
+                parentElement = document.getElementById(config.parentId);
+                if (parentElement) {
+                    this.videoElement = document.createElement('video');
+                    this.videoElement.id = this.parentContainerId;
+                    this.videoElement.className = config.isVideoImmersivePlayer ? 'video-js brila-vip-vjs' : 'video-js brila-video-js';
+                    this.videoElement.setAttribute('playsinline', 'true');
+                    this.videoElement.setAttribute('disablepictureinpicture', 'true');
+                    if (!config.shouldDisableControls && !config.isChromelessPlayer) {
+                        this.videoElement.setAttribute('controls', 'true');
+                    }
+                    if (config.shouldAutoplay === true) { // Explicit check
+                        this.videoElement.setAttribute('autoplay', 'true');
+                    }
+                    if (config.shouldStartMuted === true || config.isChromelessPlayer === true) {
+                        this.videoElement.setAttribute('muted', 'true');
+                    }
+                    if (!config.shouldPreload) {
+                        this.videoElement.setAttribute('preload', 'none');
+                    }
+                    if (config.enableDynamicBlur === true) { // Explicit check
+                        this.dynamicBlurWrapper = document.createElement('canvas');
+                        this.dynamicBlurWrapper.classList.add("awa-blur-wrapper");
+                        parentElement.appendChild(this.dynamicBlurWrapper);
+                        parentElement.classList.add('awa-blur-background');
+                    }
+                    parentElement.appendChild(this.videoElement);
+                }
+            }
+            const languageCode = this.getDefaultLanguageForPlayer();
+            const videoJSConfig = {
+                player: {
+                    playsinline: true,
+                    autoplay: config.shouldAutoplay,
+                    loop: config.shouldLoop,
+                    muted: config.shouldStartMuted || config.isChromelessPlayer,
+                    preload: config.shouldPreload ? 'auto' : 'none',
+                    techOrder: ["html5"],
+                    // make the text track settings dialog not initialize
+                    textTrackSettings: false,
+                    html5: {
+                        //  References :
+                        // 1. https://github.com/videojs/http-streaming#overridenative
+                        // 2. https://github.com/videojs/videojs-contrib-hls/issues/1434
+                        hls: {
+                            overrideNative: brilaFactory.overrideNativePlayer()
+                        },
+                        nativeAudioTracks: false,
+                        nativeVideoTracks: false,
+                        nativeTextTracks: false
+                    },
+                    controlBar: {
+                        pictureInPictureToggle: false
+                    },
+                    language: languageCode,
+                },
+                hotkeys: {
+                    skipInitialFocus: config.skipInitialFocus,
+                    enableInactiveFocus: config.enableInactiveFocus
+                }
+            };
+            if (config.languageLocalization) {
+                videoJSConfig.player.languages = {
+                    [languageCode]: {
+                        'Play': config.languageLocalization.play,
+                        'Play Video': config.languageLocalization.playVideo,
+                        'Pause': config.languageLocalization.pause,
+                        'Mute': config.languageLocalization.mute,
+                        'Unmute': config.languageLocalization.unmute,
+                        'VolumeSlider': config.languageLocalization.volumeSlider,
+                        'Volume Level': config.languageLocalization.volumeLevel,
+                        'Fullscreen': config.languageLocalization.fullscreen,
+                        'Exit Fullscreen': config.languageLocalization.nonfullscreen,
+                        'Captions': config.languageLocalization.captions,
+                        'Subtitles': config.languageLocalization.subtitles,
+                        'Progress Bar': config.languageLocalization.scrubberBar
+                    }
+                };
+            }
+            if (config.allowCrossOrigin === true) { // Explicit check for BC
+                videoJSConfig.player.crossorigin = 'anonymous';
+            }
+            if (config.closedCaptionsConfig) {
+                videoJSConfig.player.languages = videoJSConfig.player.languages || {};
+                videoJSConfig.player.languages[languageCode] = Object.assign({}, videoJSConfig.player.languages[languageCode], {
+                    "captions off": config.closedCaptionsConfig.captionsOffText,
+                    "subtitles off": config.closedCaptionsConfig.captionsOffText,
+                }, config.closedCaptionsConfig.languageToLabelTexts);
+            }
+            if (config.isChromelessPlayer === true) { // Explicit check for BC
+                videoJSConfig.player['children'] = ['MediaLoader']; //this will just load Video tag HTML.
+                videoJSConfig.player['controls'] = false;
+            }
+            if (config.isVideoImmersivePlayer === true) { // Explicit check for BC
+                videoJSConfig.player['bigPlayButton'] = false;
+                videoJSConfig.player['posterImage'] = config.posterSource;
+                videoJSConfig.player['controlBar'] = {
+                    playToggle: false,
+                    volumePanel: false,
+                    currentTimeDisplay: true,
+                    remainingTimeDisplay: true,
+                    fullscreenToggle: false,
+                };
+            }
+            else if (config.shouldDisableControls === true) { // Explicit check for BC
+                videoJSConfig.player['controlBar'] = {
+                    volumePanel: false
+                };
+            }
+            // This is to address a memory leak and loading issue with twister and videojs.
+            // When a variant is selected, all previous instances of videojs are still kept in memory of the global videojs
+            // These previous instances can also cause issues with loading new instances if you swap back from a variant
+            // With this, we will look for previous iterations of the same placement and dispose of them
+            // Before trying to instantiate a new player with the same data
+            if (window.videojs) {
+                const allPlayers = window.videojs.getAllPlayers() || [];
+                const previousPlayer = allPlayers.find((x) => x && (x.id() || "undefined-player-container") === this.parentContainerId);
+                if (previousPlayer) {
+                    previousPlayer.dispose();
+                }
+            }
+            const player = brilaFactory.embed(this.parentContainerId, config, videoJSConfig);
+            this.videoJS = player;
+            /* Set VideoJS-constructed container to 100% width 100% height.
+             * Quick search online didn't yield a better way to do this, but
+             * maybe one exists.
+             */
+            const videoContainer = document.getElementById(this.parentContainerId);
+            if (videoContainer) {
+                videoContainer.setAttribute('style', 'width:100%; height:100%;');
+                // Want to default to showing the poster image unless this is explicitly false.
+                const noPosterImage = config.showPosterImage === false;
+                if (!noPosterImage) {
+                    this.videoJS.poster(config.posterSource);
+                }
+                // Set Alt-Text to selectable element
+                if (this.currentAsset && (this.currentAsset.altText || this.currentAsset.videoTitle)) {
+                    const ariaLabel = this.currentAsset.altText || this.currentAsset.videoTitle || '';
+                    // Prepend with 'Click to play Video' translation
+                    const htmlSafeLabel = this.getLocalizedString("Play Video") + ", " + this.encodeForHtml(ariaLabel);
+                    this.altTextElement.setAttribute("aria-label", htmlSafeLabel);
+                }
+                videoContainer.insertBefore(this.altTextElement, videoContainer.firstChild);
+                this.setAriaLabels(this.videoJS, videoContainer);
+                // Make Big Play untabbable to avoid duplicate tabbable interact elements
+                const bigPlayButton = videoContainer.querySelector('.vjs-big-play-button');
+                if (bigPlayButton)
+                    bigPlayButton.tabIndex = -1;
+                //Avoid initializing player with video url if ShouldPreload is set to false in config.
+                //TT: https://tt.amazon.com/0509149037cd
+                if (config.shouldPreload) {
+                    this.videoJS.src({ src: config.videoUrl, type: config.mimeType });
+                }
+                this.vseMetrics = brilaFactory.metrics(this.videoJS);
+                this.vseMetrics.updateMuteMetrics(this.eventEmitter);
+                const scrubber = videoContainer.querySelector('.vjs-progress-holder.vjs-slider.vjs-slider-horizontal');
+                if (scrubber)
+                    scrubber.onclick = (_e) => {
+                        this.emitScrubberClick();
+                    };
+                // Override the basic activitycheck for videojs to not hide the control bar if an element has focus
+                this.overrideActivityCheck();
+                if (config.isVideoImmersivePlayer === true) { // Explicit check for BC
+                    this.videoJS.on('click', () => {
+                        this.eventEmitter.emit('playerClick');
+                    });
+                    this.videoJS.on('touchstart', () => {
+                        this.eventEmitter.emit('playerClick');
+                    });
+                }
+                else {
+                    this.videoJS.aspectRatio('16:9');
+                    const remainingTimeElement = videoContainer.querySelector('.vjs-remaining-time');
+                    if (remainingTimeElement)
+                        remainingTimeElement.setAttribute('tabindex', '0');
+                }
+            }
+            this.videoJS.on('ended', () => { this.eventHandlers.onPlaybackComplete(); });
+            // NOTE: this will fire whenever the player begins OR resumes playback
+            this.videoJS.on('playing', () => {
+                this.eventHandlers.onPlaybackStart();
+                if (this.config.useAutoplayFallback) {
+                    this.eventEmitter.emit('autoplaySucceeded');
+                    this.config.useAutoplayFallback = false;
+                }
+            });
+            this.videoJS.on('cancelContinuousPlay', () => { this.eventHandlers.onCancelContinuousPlay(); });
+            this.videoJS.on('playUpNext', () => { this.eventHandlers.onPlayUpNext(); });
+            const self = this;
+            player.ready(() => {
+                self.eventEmitter.emit('playerLoaded');
+                // Removing duplicated aria labels
+                // https://github.com/videojs/video.js/issues/4376 & https://t.corp.amazon.com/P89022838
+                if (parentElement && parentElement.children[0]) {
+                    parentElement.children[0].removeAttribute('role');
+                    parentElement.children[0].removeAttribute('aria-label');
+                }
+            });
+            if (config.feedbackFactory || config.includeEarnsComissionDisclosure === true) { // Explicit check for backwards compatability of possible bad data
+                this.basicComponents = new BasicComponents(config, this);
+                this.basicComponents.initialize(this.currentAsset);
+            }
+        }
+        play(asset) {
+            const currentTime = Date.now();
+            this.vseMetrics.setPlayCommandInvokeTimestamp(currentTime);
+            // IB Desktop fullscreen case, when play() is triggered from playVSEVideos() in DPX with incorrect asset.
+            // TODO fix this issue in DPX instead: https://issues.amazon.com/issues/VA-20187
+            if (this.isDPXDesktopFullScreenRequest(asset)) {
+                this.vseMetrics.setPageLoadStartTimestamp(currentTime);
+                return this.videoJS.play();
+            }
+            this.setInitialData(asset);
+            if (this.dynamicBlurWrapper) {
+                const videoEle = document.getElementById(this.videoElement.id);
+                this.registerEventsForLazyBlur(videoEle, this.dynamicBlurWrapper);
+            }
+            if (this.config.useAutoplayFallback === true) { // Explicit check for backwards compatability of possible bad data
+                const promise = this.videoJS.play();
+                if (promise) {
+                    promise.then(_ => {
+                        // Video starts playing
+                    }).catch(error => {
+                        this.eventEmitter.emit('autoplayFailed');
+                    });
+                }
+            }
+            return this.videoJS.play();
+        }
+        setInitialData(asset) {
+            // Get current text track mode to save state before changing tracks
+            // Is this supposed to be hardcoded as 'en'?
+            const previousTextTrackMode = this.getTextTrackMode("en");
+            if (asset && asset.rankingStrategy && Object.keys(asset).length === 1) {
+                // Emit metric for ranking strategy for inline player case
+                this.vseMetrics.setRankingStrategy(asset.rankingStrategy);
+            }
+            else if (asset) {
+                // Check if rankingStrategy is the only property in the asset object
+                const isOnlyRankingStrategy = Object.keys(asset).length === 1 && ('rankingStrategy' in asset);
+                if (!isOnlyRankingStrategy) {
+                    if (!this.currentAsset || asset.contentId !== this.currentAsset.contentId) {
+                        this.videoJS.poster(asset.imageUrl);
+                        this.videoJS.posterImage.show();
+                        if (this.vseMetrics.setContentId) {
+                            this.vseMetrics.setContentId(asset.contentId);
+                        }
+                        this.vseMetrics.setAciContentId(asset.aciContentId);
+                        if (this.vseMetrics.setRefTag) {
+                            // Set reftag to vseMetrics in order to access it in Brila metrics plugin:
+                            const reftag = asset.refTag ? asset.refTag : "";
+                            this.vseMetrics.setRefTag(reftag);
+                        }
+                        if (this.vseMetrics.setOspAttribution) {
+                            const ospData = {
+                                ospTrackingLink: asset.ospTrackingLink ? asset.ospTrackingLink : "",
+                                vendorTrackingId: asset.vendorTrackingId ? asset.vendorTrackingId : "",
+                                videoReferenceId: asset.videoReferenceId ? asset.videoReferenceId : "",
+                                productAsin: asset.productAsin ? asset.productAsin : ""
+                            };
+                            this.vseMetrics.setOspAttribution(ospData);
+                        }
+                        this.videoJS.src({ src: asset.videoUrl, type: asset.mimeType });
+                        this.currentAsset = asset;
+                        this.setSeekTimeForInitialData(asset);
+                    }
+                    else {
+                        if (!this.config.shouldPreload) {
+                            this.videoJS.src({ src: asset.videoUrl, type: asset.mimeType });
+                        }
+                        this.setSeekTimeForInitialData(asset);
+                    }
+                    this.vseMetrics.setRankingStrategy(asset.rankingStrategy);
+                    if (this.vseMetrics.setCreatorType) {
+                        this.vseMetrics.setCreatorType(asset.creatorType);
+                    }
+                    if (this.basicComponents !== undefined) {
+                        this.basicComponents.update(asset);
+                    }
+                    if (asset && (asset.altText || asset.title)) {
+                        // The safe title is only being used for the Aria-Label here (not the video Title)
+                        // The encoding for aria-label is really just for quotes/double-quotes.
+                        const ariaLabel = asset.altText || asset.title || '';
+                        // Prepend with 'Click to play Video' translation
+                        const htmlSafeLabel = this.getLocalizedString("Play Video") + ", " + this.encodeForHtml(ariaLabel);
+                        if (this.altTextElement)
+                            this.altTextElement.setAttribute("aria-label", htmlSafeLabel);
+                        else
+                            this.videoElement.setAttribute("aria-label", htmlSafeLabel);
+                    }
+                }
+            }
+            // Save the mode of any existing tracks
+            // Before adding text tracks for new video, make sure all text tracks from previous video are removed:
+            this.removeCurrentTextTracks();
+            let closedCaptions = [];
+            if (this.currentAsset && this.currentAsset.closedCaptions) {
+                closedCaptions = this.currentAsset.closedCaptions;
+            }
+            if (asset && asset.closedCaptions) {
+                closedCaptions = asset.closedCaptions;
+            }
+            // Add new text tracks for current video:
+            this.updateTextTrack(closedCaptions);
+            this.vseMetrics.updateTextTrackMetrics(this.eventEmitter);
+            if (previousTextTrackMode === "showing") {
+                this.enableCurrentTextTrack();
+            }
+            const ptffStart = (asset && asset.eventTimestamp) ? asset.eventTimestamp : Date.now();
+            this.vseMetrics.setPageLoadStartTimestamp(ptffStart);
+        }
+        setSeekTimeForInitialData(asset) {
+            if (asset && asset.seekTime) {
+                this.videoJS.currentTime(asset.seekTime);
+            }
+        }
+        showPoster(imageUrl) {
+            this.videoJS.poster(imageUrl);
+            this.videoJS.posterImage.show();
+            return this;
+        }
+        /** Adds new text tracks for current video
+        * @param closedCaptions list of closed captions
+        */
+        updateTextTrack(closedCaptions) {
+            // Add new text tracks for current video:
+            const textTracks = this.videoJS.textTracks();
+            for (const cc of closedCaptions) {
+                let found = false;
+                if (textTracks) {
+                    for (let i = 0; i < textTracks.length; i++) {
+                        const track = textTracks[i];
+                        if (track.kind === 'subtitles' && track.language === cc.locale) {
+                            found = true;
+                        }
+                    }
+                }
+                // Checking only first two characters as some consumers may send us a full language code, resulting in not finding the correct key
+                if (!found) {
+                    this.videoJS.addRemoteTextTrack({ src: cc.url, kind: "subtitles", srclang: cc.locale, label: this.config.closedCaptionsConfig.captionsOnTexts[cc.locale.substring(0, 2)], 'default': false }, false);
+                }
+            }
+            // Set up tracking of page-level CC state persistence
+            if (this.localStorageEnabled) {
+                const remoteTracks = this.videoJS.remoteTextTracks();
+                // Create local storage if one doesn't exist already, and enact whatever
+                // state/language is currently set
+                const ccState = localStorage.getItem(this.VSE_CC_KEY);
+                if (!ccState) {
+                    localStorage.setItem(this.VSE_CC_KEY, "disabled");
+                }
+                // Setting this based on "not disabled" to hopefully be easier to adjust to
+                // multiple tracks per video.
+                // Enable the first eligible track, regardless of language, to maintain
+                // user-set preference of displaying Closed Captions.
+                // Add event handlers to tracks to update page state when their state changes.
+                // These handlers are currently working on the assumption that there's only
+                // one track available per video.
+                if (textTracks) {
+                    for (let i = 0; i < textTracks.length; i++) {
+                        const textTrack = textTracks[i];
+                        if (ccState !== "disabled") {
+                            if (textTrack.kind === "subtitles") {
+                                textTrack.mode = "showing";
+                                // Emit status update event to allow IVX or other external UI to update.
+                                this.eventEmitter.emit('texttrackenable', textTrack);
+                            }
+                        }
+                        textTrack.on("modechange", () => {
+                            localStorage.setItem(this.VSE_CC_KEY, textTrack.mode === "showing" ? "showing" : "disabled");
+                        });
+                    }
+                }
+                if (remoteTracks) {
+                    for (let i = 0; i < remoteTracks.length; i++) {
+                        const track = remoteTracks[i];
+                        if (ccState !== "disabled") {
+                            if (track.kind === "subtitles") {
+                                track.mode = "showing";
+                                // Emit status update event to allow IVX or other external UI to update.
+                                this.eventEmitter.emit('texttrackenable', track);
+                            }
+                        }
+                        track.on("modechange", () => {
+                            localStorage.setItem(this.VSE_CC_KEY, track.mode === "showing" ? "showing" : "disabled");
+                        });
+                    }
+                }
+            }
+            return this; // For test validation
+        }
+        /** Override the Videojs useractivity check to not hide the control bar when an element has focus
+         * This is to support Accessibility changes where the control bar would disappear by default when an element
+         * has focus, and a screen reader may be in play https://t.corp.amazon.com/P126585645
+         */
+        overrideActivityCheck() {
+            if (!this.videoJS) {
+                return;
+            }
+            // Store the original userActive function
+            const originalUserActive = this.videoJS.userActive;
+            let activityCheck = 0;
+            // Override the userActive function
+            this.videoJS.userActive = (isActive) => {
+                // Check if videoJS still exists (in case the player has been destroyed)
+                if (!this.videoJS) {
+                    // Clean up the timeout if it exists to prevent memory leaks
+                    if (activityCheck) {
+                        clearTimeout(activityCheck);
+                        activityCheck = 0;
+                    }
+                    return;
+                }
+                // The userActive function in Videojs returns the state of activity if no parameter is supplied
+                // So we only need to check if the parameter is supplied else we'll block basic functionality
+                let focusedElement = document.activeElement;
+                if (isActive !== undefined && this.closestParent(focusedElement, `#${this.parentContainerId}`)) {
+                    if (activityCheck === 0) {
+                        // Essentially a debounce, we are only going to do this check every 2 seconds to avoid unnecessary polling
+                        // And only initiate when they have focus on an element
+                        activityCheck = setTimeout(() => {
+                            activityCheck = 0;
+                            // Double check videoJS still exists before continuing
+                            if (!this.videoJS) {
+                                return;
+                            }
+                            // Get the current focused element
+                            focusedElement = document.activeElement;
+                            if (this.closestParent(focusedElement, `#${this.parentContainerId}`)) {
+                                // If we are still focused within the player, we're going to recursively run this to keep polling
+                                // to see when the user stops focusing
+                                this.videoJS.userActive(originalUserActive.call(this.videoJS));
+                            }
+                            else {
+                                // We forcibly report we are no longer active because Videojs can hold on to a stale state
+                                // since it only checks for mouse/touch movement by default
+                                this.videoJS.userActive(false);
+                            }
+                        }, 2000);
+                    }
+                    return originalUserActive.call(this.videoJS, true);
+                }
+                return originalUserActive.call(this.videoJS, isActive);
+            };
+        }
+        // Set as a mockable function as PhantomPage cannot use closest
+        closestParent(element, selector) {
+            return element ? element.closest(selector) : null;
+        }
+        enableCurrentTextTrack(language = "en") {
+            this.changeTextTrackMode(language, "showing");
+            return this;
+        }
+        disableCurrentTextTrack(language = "en") {
+            this.changeTextTrackMode(language, "disabled");
+            return this;
+        }
+        muted(shouldMute) {
+            return this.videoJS.muted(shouldMute);
+        }
+        mute(source) {
+            this.videoJS.muted(true, source);
+            return this;
+        }
+        unmute(source) {
+            this.videoJS.muted(false, source);
+            return this;
+        }
+        isMuted() {
+            return this.videoJS.muted();
+        }
+        getCurrentTime() {
+            return this.videoJS.currentTime();
+        }
+        setCurrentTime(seekTime) {
+            this.videoJS.currentTime(seekTime);
+            return this;
+        }
+        getMediaDuration() {
+            return !isNaN(this.videoJS.duration()) ? this.videoJS.duration() : 0;
+        }
+        pause(source) {
+            this.videoJS.pause(source);
+            return this;
+        }
+        resume(eventTimestamp) {
+            this.videoJS.play();
+            return this;
+        }
+        seek(time) {
+            this.videoJS.currentTime(time);
+            return this;
+        }
+        stop() {
+            this.videoJS.pause();
+            this.currentAsset = undefined;
+            return this;
+        }
+        on(playerEvent, callback) {
+            this.eventEmitter.on(playerEvent, callback);
+            this.videoJS.on(playerEvent, callback);
+            return this;
+        }
+        off(playerEvent, callback) {
+            return this;
+        }
+        ready(callback) {
+            this.videoJS.ready(callback);
+            return this;
+        }
+        readyState() {
+            return this.videoJS.readyState();
+        }
+        load() {
+            this.videoJS.load();
+            return this;
+        }
+        getCurrent() {
+            return this.currentAsset;
+        }
+        getPosition() {
+            return this.videoJS.currentTime();
+        }
+        isPlaying() {
+            return !this.videoJS.paused();
+        }
+        isPaused() {
+            return this.videoJS.paused();
+        }
+        getVersion() {
+            return 'VJS';
+        }
+        destroy() {
+            this.vseMetrics.publishBeforeDispose();
+            this.videoJS.off('ended', this.eventHandlers.onPlaybackComplete);
+            this.videoJS.dispose();
+            this.videoJS = null;
+            if (this.basicComponents !== undefined) {
+                this.basicComponents.destroy();
+            }
+        }
+        addChild(child, object) {
+            this.videoJS.addChild(child, object);
+            return this;
+        }
+        removeChild(child) {
+            this.videoJS.removeChild(child);
+            return this;
+        }
+        loadNextVideoPoster(posterImage) {
+            this.videoJS.poster(posterImage);
+            this.videoJS.posterImage.show();
+            return this;
+        }
+        aspectRatio(ratio) {
+            this.videoJS.aspectRatio(ratio);
+            return this;
+        }
+        requestFullscreen() {
+            this.videoJS.requestFullscreen();
+            return this;
+        }
+        exitFullscreen() {
+            this.videoJS.exitFullscreen();
+            return this;
+        }
+        isFullscreen() {
+            return this.videoJS.isFullscreen();
+        }
+        fluid(isResponsivePlayer) {
+            this.videoJS.fluid(isResponsivePlayer);
+            return this;
+        }
+        blur() {
+            this.videoJS.blur();
+            return this;
+        }
+        isCaptionOn() {
+            // Check in remote text tracks if captions are on
+            const remoteTextTracks = this.videoJS.remoteTextTracks();
+            if (remoteTextTracks) {
+                for (let i = 0; i < remoteTextTracks.length; i++) {
+                    const track = remoteTextTracks[i];
+                    if (track.mode === "showing") {
+                        return true;
+                    }
+                }
+            }
+            // Check in text tracks if captions are on
+            const textTracks = this.videoJS.textTracks();
+            if (textTracks) {
+                for (let i = 0; i < textTracks.length; i++) {
+                    const textTrack = textTracks[i];
+                    if (textTrack.mode === "showing") {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        isAutoplayed() {
+            return this.videoJS.options() && this.videoJS.options().autoplay ? this.videoJS.options().autoplay : false;
+        }
+        getTitleSessionId() {
+            return this.vseMetrics.getTitleSessionId();
+        }
+        requestPictureInPicture() {
+            this.videoJS.requestPictureInPicture();
+            return this;
+        }
+        exitPictureInPicture() {
+            this.videoJS.exitPictureInPicture();
+            return this;
+        }
+        emitStartCountMetric() {
+            // Defense in depth: suppress duplicate startCount emissions when a host calls this
+            // public API more than once within a single title session (e.g. native wrappers or
+            // the IVX controller firing on their own play/resume/viewport callbacks). The
+            // underlying player also guards this, but external callers should not be able to
+            // inflate view counts by re-invoking the shim. See P388772391.
+            const titleSessionId = this.vseMetrics.getTitleSessionId();
+            if (titleSessionId && this.startCountEmittedTitleSessionId === titleSessionId) {
+                return this;
+            }
+            this.startCountEmittedTitleSessionId = titleSessionId;
+            this.vseMetrics.emitStartCountMetric();
+            return this;
+        }
+        emitScrubberClick() {
+            this.vseMetrics.emitScrubberClick();
+            return this;
+        }
+        emitSkipForwardClick() {
+            this.vseMetrics.emitSkipForwardClick();
+            return this;
+        }
+        emitSkipBackwardClick() {
+            this.vseMetrics.emitSkipBackwardClick();
+            return this;
+        }
+        /** Sets player mode. Right now, it is only used to dynamically update placement context
+         * for metrics based on the mode. It can be extended if we need to add more logic depending on player mode
+         * @param playerMode supports following values: 'inline', 'preview', 'ivx'. Passing empty string
+         * indicates to return back to initial mode and initial placement context.
+         */
+        setPlayerMode(playerMode) {
+            this.vseMetrics.updatePlacementContext(playerMode);
+            return this;
+        }
+        initHandlers() {
+            this.eventHandlers = {
+                onPlaybackComplete: () => this.player_onPlaybackComplete(),
+                onPlaybackStart: () => this.player_onPlaybackStart(),
+                onCancelContinuousPlay: () => this.player_onCancelContinuousPlay(),
+                onPlayUpNext: () => this.player_onPlayUpNext()
+            };
+        }
+        player_onPlaybackComplete() {
+            const asset = this.currentAsset;
+            this.previousAsset = this.currentAsset;
+            if (this.previousAsset) {
+                this.previousAsset.eventTimestamp = Date.now();
+            }
+            this.eventEmitter.emit('playbackComplete', asset);
+        }
+        player_onCancelContinuousPlay() {
+            this.currentAsset = this.previousAsset;
+            this.eventEmitter.emit('cancelContinuousPlay', this.previousAsset);
+        }
+        player_onPlayUpNext() {
+            this.eventEmitter.emit('playUpNext', this.previousAsset);
+        }
+        player_onPlaybackStart() {
+            if (this.currentAsset) {
+                this.currentAsset.eventTimestamp = Date.now();
+            }
+            this.eventEmitter.emit('playbackStart', this.currentAsset);
+        }
+        isDPXDesktopFullScreenRequest(asset) {
+            const ibDesktopPlacement = this.config.sushiMetricsConfig && this.config.sushiMetricsConfig.placementContext
+                && this.config.sushiMetricsConfig.placementContext.indexOf("desktop_web.ImageBlock") !== -1;
+            // asset from DPX call doesn't have refTag:
+            return ibDesktopPlacement && asset && !asset.hasOwnProperty('refTag') && this.currentAsset && asset.contentId !== this.currentAsset.contentId;
+        }
+        changeTextTrackMode(language, mode) {
+            // Get all remote text tracks for the current player.
+            const remoteTextTracks = this.videoJS.remoteTextTracks();
+            if (remoteTextTracks) {
+                for (let i = 0; i < remoteTextTracks.length; i++) {
+                    const track = remoteTextTracks[i];
+                    // Find correct captions track and mark it as "showing".
+                    if (track.kind === 'subtitles' && track.language === language) {
+                        track.mode = mode;
+                    }
+                }
+            }
+            // Get all text tracks for the current player.
+            const textTracks = this.videoJS.textTracks();
+            if (textTracks) {
+                for (let i = 0; i < textTracks.length; i++) {
+                    const textTrack = textTracks[i];
+                    // Find correct captions track and mark it as "showing".
+                    if (textTrack.kind === 'subtitles' && textTrack.language === language) {
+                        textTrack.mode = mode;
+                    }
+                }
+            }
+        }
+        getTextTrackMode(language) {
+            const tracks = this.videoJS.remoteTextTracks();
+            if (tracks) {
+                for (let i = 0; i < tracks.length; i++) {
+                    const track = tracks[i];
+                    if (track.kind === 'subtitles' && track.language === language) {
+                        return track.mode;
+                    }
+                }
+            }
+            const textTracks = this.videoJS.textTracks();
+            if (textTracks) {
+                for (let i = 0; i < textTracks.length; i++) {
+                    const textTrack = textTracks[i];
+                    if (textTrack.kind === 'subtitles' && textTrack.language === language) {
+                        return textTrack.mode;
+                    }
+                }
+            }
+            // Return disabled as default if we couldn't find the specified track
+            return "disabled";
+        }
+        removeCurrentTextTracks() {
+            // textTracks can't be removed. Remove only from remoteTextTracks
+            const tracks = this.videoJS.remoteTextTracks();
+            if (tracks) {
+                for (let i = 0; i < tracks.length; i++) {
+                    this.videoJS.removeRemoteTextTrack(tracks[i]);
+                }
+            }
+        }
+        getDefaultLanguageForPlayer() {
+            /**
+             * Below language code is used to set the 'Captions off' text in CC menu while initializing player.
+             * Since the localized value of 'Captions off' is created using Locale passed in request, same is being used here.
+             */
+            return this.config.languageCode ? this.config.languageCode.toString() : 'en';
+        }
+        /** Set Aria Labels for the Control Bar */
+        setAriaLabels(player, videoContainer) {
+            const controlBar = player.controlBar;
+            if (controlBar) {
+                for (const child of controlBar.children()) {
+                    const element = child.el();
+                    if (element.classList.contains('vjs-progress-control')) {
+                        // The scrubber/progress bar does not set a title attribute by default
+                        const control = element.querySelector('.vjs-slider');
+                        control.title = control.ariaLabel;
+                    }
+                    else if (element.tagName.toLowerCase() === 'button') {
+                        if (element.title) {
+                            element.setAttribute('aria-label', element.title);
+                        }
+                    }
+                    else {
+                        // If the button has the control text on a lower element
+                        const button = element.querySelector('button');
+                        const controlText = element.querySelector('.vjs-control-text');
+                        if (button && controlText) {
+                            button.setAttribute('aria-label', controlText.innerText);
+                        }
+                    }
+                }
+            }
+            // Set the title attribute of volume slider to the same value as aria-label
+            // TT: https://t.corp.amazon.com/P111945020
+            const volumeBar = videoContainer.querySelector('.vjs-volume-bar.vjs-slider-bar');
+            if (volumeBar)
+                volumeBar.setAttribute('title', this.getLocalizedString('Volume Level'));
+        }
+        /** Detect if local storage is enabled on browser */
+        testLocalStorage() {
+            try {
+                window.localStorage.setItem("foo", "bar");
+                window.localStorage.removeItem("foo");
+                return true;
+            }
+            catch (exception) {
+                return false;
+            }
+        }
+        /** Mockable Localization Helper for testing */
+        getLocalizedString(key) {
+            return this.videoJS.localize(key);
+        }
+        /** Create an element to display the alt text for the video player
+         * @param parentId: id of the parent element to which the alt text element is appended
+         */
+        createAltTextElement(parentId) {
+            const altTextElement = document.createElement('div');
+            altTextElement.id = `altText-${parentId}`;
+            altTextElement.className = 'ive-alttext-container';
+            altTextElement.setAttribute('tabindex', '0');
+            altTextElement.setAttribute('role', 'description');
+            altTextElement.onclick = () => {
+                if (this.videoJS.paused()) {
+                    this.videoJS.play();
+                }
+                else {
+                    this.videoJS.pause();
+                }
+            };
+            altTextElement.onkeydown = (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault(); // Prevent page scroll on space
+                    if (this.videoJS.paused()) {
+                        this.videoJS.play();
+                    }
+                    else {
+                        this.videoJS.pause();
+                    }
+                }
+            };
+            return altTextElement;
+        }
+    }
+
+    class PlayerPromiseShim {
+        constructor(playerPromise, libs) {
+            this.libs = libs;
+            this.commands = [];
+            playerPromise.then((player) => {
+                this.playerInstance = player;
+                this.executeCommands();
+            });
+        }
+        executeCommands() {
+            for (var i = 0; i < this.commands.length; i++) {
+                if (this.playerInstance) {
+                    this.commands[i](this.playerInstance);
+                }
+            }
+        }
+        play(asset) {
+            if (this.playerInstance)
+                this._play(asset, this.playerInstance);
+            else
+                this.commands.push((...args) => this._play(asset, args[0]));
+            return this;
+        }
+        mute(source) {
+            if (this.playerInstance) {
+                this._mute(this.playerInstance, source);
+            }
+            else {
+                this.commands.push((...args) => this._mute(args[0], source));
+            }
+            return this;
+        }
+        unmute() {
+            if (this.playerInstance) {
+                this._unmute(this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => this._unmute(args[0]));
+            }
+            return this;
+        }
+        isMuted() {
+            if (this.playerInstance) {
+                return this._isMuted(this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => this._isMuted(args[0]));
+            }
+            return true;
+        }
+        emitStartCountMetric() {
+            if (this.playerInstance) {
+                this._emitStartCountMetric(this.playerInstance);
+            }
+            return this;
+        }
+        emitSkipForwardClick() {
+            if (this.playerInstance) {
+                this._emitSkipForwardClick(this.playerInstance);
+            }
+            return this;
+        }
+        emitSkipBackwardClick() {
+            if (this.playerInstance) {
+                this._emitSkipBackwardClick(this.playerInstance);
+            }
+            return this;
+        }
+        emitScrubberClick() {
+            if (this.playerInstance) {
+                this._emitScrubberClick(this.playerInstance);
+            }
+            return this;
+        }
+        getCurrentTime() {
+            if (this.playerInstance) {
+                return this._getCurrentTime(this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => this._getCurrentTime(args[0]));
+            }
+            return 0;
+        }
+        setCurrentTime(seekTime) {
+            if (this.playerInstance) {
+                this._setCurrentTime(seekTime, this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => this._setCurrentTime(seekTime, args[0]));
+            }
+        }
+        getMediaDuration() {
+            if (this.playerInstance) {
+                return this._getMediaDuration(this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => this._getMediaDuration(args[0]));
+            }
+            return 0;
+        }
+        pause(source) {
+            if (this.playerInstance)
+                this._pause(source, this.playerInstance);
+            else
+                this.commands.push((...args) => this._pause(source, args[0]));
+            return this;
+        }
+        resume(eventTimestamp) {
+            if (this.playerInstance)
+                this._resume(eventTimestamp, this.playerInstance);
+            else
+                this.commands.push((...args) => this._resume(eventTimestamp, args[0]));
+            return this;
+        }
+        stop() {
+            if (this.playerInstance)
+                this._stop(this.playerInstance);
+            else
+                this.commands.push((...args) => this._stop(args[0]));
+            return this;
+        }
+        seek(time) {
+            if (this.playerInstance)
+                this._seek(time, this.playerInstance);
+            else
+                this.commands.push((...args) => this._seek(time, args[0]));
+            return this;
+        }
+        on(playerEvent, callback) {
+            if (this.playerInstance)
+                this._on(playerEvent, callback, this.playerInstance);
+            else
+                this.commands.push((...args) => this._on(playerEvent, callback, args[0]));
+            return this;
+        }
+        off(playerEvent, callback) {
+            if (this.playerInstance)
+                this._off(playerEvent, callback, this.playerInstance);
+            else
+                this.commands.push((...args) => this._off(playerEvent, callback, args[0]));
+            return this;
+        }
+        ready(callback) {
+            if (this.playerInstance)
+                this._ready(callback, this.playerInstance);
+            else
+                this.commands.push((...args) => this._ready(callback, args[0]));
+            return this;
+        }
+        load() {
+            if (this.playerInstance)
+                this._load(this.playerInstance);
+            else
+                this.commands.push((...args) => this._load(args[0]));
+            return this;
+        }
+        readyState() {
+            if (this.playerInstance)
+                return this.playerInstance.readyState();
+            return 0;
+        }
+        aspectRatio(ratio) {
+            if (this.playerInstance)
+                this._aspectRatio(ratio, this.playerInstance);
+            else
+                this.commands.push((...args) => this._aspectRatio(ratio, args[0]));
+            return this;
+        }
+        getCurrent() {
+            if (this.playerInstance)
+                return this.playerInstance.getCurrent();
+        }
+        getPosition() {
+            if (this.playerInstance)
+                return this.playerInstance.getPosition();
+            return 0;
+        }
+        isPlaying() {
+            if (this.playerInstance)
+                return this.playerInstance.isPlaying();
+            return false;
+        }
+        isPaused() {
+            if (this.playerInstance)
+                return this.playerInstance.isPaused();
+            return false;
+        }
+        getVersion() {
+            if (this.playerInstance)
+                return this.playerInstance.getVersion();
+            return '';
+        }
+        destroy() {
+            if (this.playerInstance)
+                this._destroy(this.playerInstance);
+            else
+                this.commands.push((...args) => this._destroy(args[0]));
+        }
+        addChild(child, object) {
+            if (this.playerInstance)
+                this.playerInstance.addChild(child, object);
+            return this;
+        }
+        removeChild(child) {
+            if (this.playerInstance)
+                this.playerInstance.removeChild(child);
+            return this;
+        }
+        loadNextVideoPoster(posterImage) {
+            if (this.playerInstance)
+                this.playerInstance.loadNextVideoPoster(posterImage);
+            return this;
+        }
+        setInitialData(asset) {
+            if (this.playerInstance)
+                this.playerInstance.setInitialData(asset);
+            return this;
+        }
+        updateTextTrack(closedCaptions) {
+            if (this.playerInstance)
+                this.playerInstance.updateTextTrack(closedCaptions);
+            return this;
+        }
+        removeCurrentTextTracks() {
+            if (this.playerInstance)
+                this.playerInstance.removeCurrentTextTracks();
+            return this;
+        }
+        showPoster(imageUrl) {
+            if (this.playerInstance)
+                this.playerInstance.showPoster(imageUrl);
+            return this;
+        }
+        blur() {
+            if (this.playerInstance)
+                this.playerInstance.blur();
+            return this;
+        }
+        requestFullscreen() {
+            if (this.playerInstance)
+                this._requestFullscreen(this.playerInstance);
+            else
+                this.commands.push((...args) => this._requestFullscreen(args[0]));
+            return this;
+        }
+        exitFullscreen() {
+            if (this.playerInstance)
+                this.playerInstance.exitFullscreen();
+            return this;
+        }
+        isFullscreen() {
+            if (this.playerInstance)
+                return this.playerInstance.isFullscreen();
+            return false;
+        }
+        fluid(isResponsivePlayer) {
+            if (this.playerInstance)
+                this.playerInstance.fluid(isResponsivePlayer);
+            return this;
+        }
+        enableCurrentTextTrack(language = "en") {
+            if (this.playerInstance)
+                this.playerInstance.enableCurrentTextTrack(language);
+        }
+        disableCurrentTextTrack(language = "en") {
+            if (this.playerInstance)
+                this.playerInstance.disableCurrentTextTrack(language);
+        }
+        isCaptionOn() {
+            return this.playerInstance ? this.playerInstance.isCaptionOn() : false;
+        }
+        isAutoplayed() {
+            return this.playerInstance ? this.playerInstance.isAutoplayed() : false;
+        }
+        getTitleSessionId() {
+            return this.playerInstance ? this.playerInstance.getTitleSessionId() : "";
+        }
+        requestPictureInPicture() {
+            if (this.playerInstance) {
+                this._requestPictureInPicture(this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => { this._requestPictureInPicture(args[0]); });
+            }
+            return this;
+        }
+        exitPictureInPicture() {
+            if (this.playerInstance) {
+                this._exitPictureInPicture(this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => { this._exitPictureInPicture(args[0]); });
+            }
+            return this;
+        }
+        setPlayerMode(playerMode) {
+            if (this.playerInstance) {
+                this._setPlayerMode(playerMode, this.playerInstance);
+            }
+            else {
+                this.commands.push((...args) => this._setPlayerMode(playerMode, args[0]));
+            }
+            return this;
+        }
+        _setPlayerMode(playerMode, player) {
+            player.setPlayerMode(playerMode);
+        }
+        _play(asset, player) {
+            if (asset)
+                player.play(asset);
+            else
+                player.play();
+        }
+        _mute(player, source) {
+            player.mute(source);
+        }
+        _unmute(player) {
+            player.unmute();
+        }
+        _emitStartCountMetric(player) {
+            player.emitStartCountMetric();
+        }
+        _emitScrubberClick(player) {
+            player.emitScrubberClick();
+        }
+        _emitSkipForwardClick(player) {
+            player.emitSkipForwardClick();
+        }
+        _emitSkipBackwardClick(player) {
+            player.emitSkipBackwardClick();
+        }
+        _isMuted(player) {
+            return player.isMuted();
+        }
+        _getCurrentTime(player) {
+            return player.getCurrentTime();
+        }
+        _setCurrentTime(seekTime, player) {
+            player.setCurrentTime(seekTime);
+        }
+        _getMediaDuration(player) {
+            return player.getMediaDuration();
+        }
+        _pause(source, player) {
+            player.pause(source);
+        }
+        _stop(player) {
+            player.stop();
+        }
+        _requestFullscreen(player) {
+            player.requestFullscreen();
+        }
+        _resume(eventTimestamp, player) {
+            player.resume(eventTimestamp);
+        }
+        _seek(time, player) {
+            player.seek(time);
+        }
+        _on(playerEvent, callback, player) {
+            player.on(playerEvent, callback);
+        }
+        _off(playerEvent, callback, player) {
+            player.off(playerEvent, callback);
+        }
+        _ready(callback, player) {
+            player.ready(callback);
+        }
+        _load(player) {
+            player.load();
+        }
+        _destroy(player) {
+            player.destroy();
+            this.playerInstance = null;
+        }
+        _aspectRatio(ratio, player) {
+            player.aspectRatio(ratio);
+        }
+        _requestPictureInPicture(player) {
+            player.requestPictureInPicture();
+        }
+        _exitPictureInPicture(player) {
+            player.exitPictureInPicture();
+        }
+    }
+
+    /**
+     * BrilaConfig class
+     *
+     * Documentation about hot-keys values: https://github.com/ctd1500/videojs-hotkeys
+     */
+    class BrilaConfig {
+        constructor() { }
+        create(config, vjsContainer, initialVideo) {
+            const videoAsset = initialVideo ? initialVideo : config.initialVideo;
+            const brilaConfig = {
+                contentId: `${videoAsset.contentId}`,
+                customerId: config.customerId,
+                isForesterTrackingDisabled: config.sushiMetricsConfig.isRobot,
+                foresterMetadataParams: {
+                    client: config.requestMetadata.clientId,
+                    marketplaceId: config.requestMetadata.marketplaceId,
+                    method: config.requestMetadata.method,
+                    requestId: config.requestMetadata.requestId,
+                    session: config.requestMetadata.sessionId
+                },
+                videoUrl: videoAsset.videoUrl,
+                posterSource: videoAsset.imageUrl,
+                pageAsin: config.requestMetadata.pageAsin,
+                parentId: vjsContainer,
+                vendorCode: videoAsset.vendorCode,
+                videoTitle: videoAsset.videoTitle,
+                shouldStartMuted: config.shouldStartMuted || false,
+                shouldAutoplay: config.shouldAutoplay || false,
+                shouldPreload: (typeof config.shouldPreload === 'undefined') ? true : config.shouldPreload,
+                shouldOverrideBackground: config.shouldOverrideBackground || false,
+                useAutoplayFallback: config.useAutoplayFallback,
+                shouldDisableControls: config.shouldDisableControls || false,
+                useCarousel: config.useCarousel,
+                useBuyBox: config.useBuyBox,
+                languagePreferenceStrings: config.languagePreferenceStrings,
+                metricsEmissionMethod: config.metricsEmissionMethod,
+                enableClickBasedAttribution: config.enableClickBasedAttribution,
+                sushiMetricsConfig: {
+                    eventSource: config.sushiMetricsConfig.eventSource,
+                    endpoint: config.sushiMetricsConfig.endpoint,
+                    requestId: config.sushiMetricsConfig.requestId,
+                    sessionId: config.sushiMetricsConfig.sessionId,
+                    customerId: config.sushiMetricsConfig.customerId,
+                    refMarkers: config.sushiMetricsConfig.refMarkers,
+                    sessionType: config.sushiMetricsConfig.sessionType,
+                    placementContext: config.sushiMetricsConfig.placementContext,
+                    marketplaceId: config.sushiMetricsConfig.marketplaceId,
+                    weblabIds: config.sushiMetricsConfig.weblabIds,
+                    pageAsin: config.sushiMetricsConfig.pageAsin,
+                    isInternal: config.sushiMetricsConfig.isInternal,
+                    isRobot: config.sushiMetricsConfig.isRobot,
+                    clientId: config.sushiMetricsConfig.clientId,
+                    creativeId: config.sushiMetricsConfig.creativeId || ''
+                },
+                refTag: config.refTag,
+                ospData: {
+                    ospTrackingLink: videoAsset.ospTrackingLink,
+                    vendorTrackingId: videoAsset.vendorTrackingId,
+                    videoReferenceId: videoAsset.videoReferenceId,
+                    productAsin: videoAsset.productAsin
+                },
+                useUpNextComponent: config.useUpNextComponent,
+                isVideoImmersivePlayer: config.isVideoImmersivePlayer,
+                ospLinkCode: config.ospLinkCode,
+                clientPrefix: config.clientPrefix,
+                languageCode: config.languageCode,
+                isChromelessPlayer: config.isChromelessPlayer,
+                enableDelphiAttribution: config.enableDelphiAttribution,
+                aciContentId: videoAsset.aciContentId,
+                mimeType: videoAsset.mimeType,
+                isReactFactory: config.isReactFactory,
+                version: config.version,
+                shouldLoop: config.shouldLoop || false,
+                skipInitialFocus: config.skipInitialFocus || false,
+                enableInactiveFocus: config.enableInactiveFocus !== false, //to set default value as true.
+                closedCaptionsConfig: config.closedCaptionsConfig,
+                languageLocalization: config.languageLocalization,
+                alwaysSetInitialVideo: config.alwaysSetInitialVideo,
+                showPosterImage: config.showPosterImage,
+                allowCrossOrigin: config.allowCrossOrigin,
+                enableDynamicBlur: config.enableDynamicBlur
+            };
+            if (config.eventTimestamp) {
+                brilaConfig.eventTimestamp = config.eventTimestamp;
+            }
+            if (config.nexusMetricsConfig) {
+                brilaConfig.nexusMetricsConfig = {
+                    eventSource: config.nexusMetricsConfig.eventSource,
+                    isInternal: config.nexusMetricsConfig.isInternal,
+                    playerTSMMetricsSchemaId: config.nexusMetricsConfig.playerTSMMetricsSchemaId,
+                    widgetMetricsSchemaId: config.nexusMetricsConfig.widgetMetricsSchemaId,
+                    producerId: config.nexusMetricsConfig.producerId,
+                    refMarkers: config.nexusMetricsConfig.refMarkers,
+                    placementContext: config.nexusMetricsConfig.placementContext,
+                    weblabIds: config.nexusMetricsConfig.weblabIds,
+                    pageAsin: config.nexusMetricsConfig.pageAsin,
+                    clientId: config.nexusMetricsConfig.clientId,
+                    creativeId: config.nexusMetricsConfig.creativeId,
+                    videoAsin: config.nexusMetricsConfig.videoAsin,
+                    videoAsinList: config.nexusMetricsConfig.videoAsinList
+                };
+            }
+            if (config.clickstreamNexusMetricsConfig) {
+                brilaConfig.clickstreamNexusMetricsConfig = {
+                    actionType: config.clickstreamNexusMetricsConfig.actionType,
+                    eventOwner: config.clickstreamNexusMetricsConfig.eventOwner,
+                    eventType: config.clickstreamNexusMetricsConfig.eventType,
+                    productId: config.clickstreamNexusMetricsConfig.productId,
+                    producerId: config.clickstreamNexusMetricsConfig.producerId,
+                    schemaId: config.clickstreamNexusMetricsConfig.schemaId,
+                };
+            }
+            if (config.feedbackFactory) {
+                brilaConfig.feedbackFactory = config.feedbackFactory;
+                brilaConfig.reportPageStateName = config.reportPageStateName;
+            }
+            if (config.includeEarnsComissionDisclosure) {
+                brilaConfig.includeEarnsComissionDisclosure = config.includeEarnsComissionDisclosure;
+            }
+            return brilaConfig;
+        }
+    }
+
+    class BrilaFactory {
+        constructor(deps) {
+            this.deps = deps;
+        }
+        /* Doesn't use the AiryLoader because it doesn't create
+         * an iframe, and therefore doesn't load the resources by
+         * writing html to that iframe
+         */
+        create(config) {
+            let that = this;
+            const promiseName = guid();
+            const promise = new this.deps.promise(function (resolve, reject) {
+                window[promiseName] = { resolve: resolve, reject: reject };
+            });
+            P.when('brila').execute('construct-player', function (vseVideoJS) {
+                window[promiseName].resolve(vseVideoJS);
+            });
+            const parent = document.getElementById(config.containerId);
+            const containerId = config.containerId + '-container';
+            parent.innerHTML = '<div id="' + containerId + '" style="width:100%; height:100%"></div>';
+            const shim = new this.deps.promise(function (resolve, reject) {
+                promise.then((factory) => {
+                    let brilaShim = new BrilaShim(factory, new BrilaConfig().create(config, containerId), config.initialVideo, that.deps);
+                    brilaShim.on("playerLoaded", function () {
+                        resolve(brilaShim);
+                    });
+                });
+            });
+            const shimThen = shim.then((player) => {
+                return player;
+            });
+            return new VSEPlayer(new PlayerPromiseShim(shimThen, this.deps), document.getElementById(containerId), this.deps);
+        }
+    }
+
+    var eventemitter3 = {exports: {}};
+
+    var hasRequiredEventemitter3;
+
+    function requireEventemitter3 () {
+    	if (hasRequiredEventemitter3) return eventemitter3.exports;
+    	hasRequiredEventemitter3 = 1;
+    	(function (module) {
+
+    		var has = Object.prototype.hasOwnProperty
+    		  , prefix = '~';
+
+    		/**
+    		 * Constructor to create a storage for our `EE` objects.
+    		 * An `Events` instance is a plain object whose properties are event names.
+    		 *
+    		 * @constructor
+    		 * @api private
+    		 */
+    		function Events() {}
+
+    		//
+    		// We try to not inherit from `Object.prototype`. In some engines creating an
+    		// instance in this way is faster than calling `Object.create(null)` directly.
+    		// If `Object.create(null)` is not supported we prefix the event names with a
+    		// character to make sure that the built-in object properties are not
+    		// overridden or used as an attack vector.
+    		//
+    		if (Object.create) {
+    		  Events.prototype = Object.create(null);
+
+    		  //
+    		  // This hack is needed because the `__proto__` property is still inherited in
+    		  // some old browsers like Android 4, iPhone 5.1, Opera 11 and Safari 5.
+    		  //
+    		  if (!new Events().__proto__) prefix = false;
+    		}
+
+    		/**
+    		 * Representation of a single event listener.
+    		 *
+    		 * @param {Function} fn The listener function.
+    		 * @param {Mixed} context The context to invoke the listener with.
+    		 * @param {Boolean} [once=false] Specify if the listener is a one-time listener.
+    		 * @constructor
+    		 * @api private
+    		 */
+    		function EE(fn, context, once) {
+    		  this.fn = fn;
+    		  this.context = context;
+    		  this.once = once || false;
+    		}
+
+    		/**
+    		 * Minimal `EventEmitter` interface that is molded against the Node.js
+    		 * `EventEmitter` interface.
+    		 *
+    		 * @constructor
+    		 * @api public
+    		 */
+    		function EventEmitter() {
+    		  this._events = new Events();
+    		  this._eventsCount = 0;
+    		}
+
+    		/**
+    		 * Return an array listing the events for which the emitter has registered
+    		 * listeners.
+    		 *
+    		 * @returns {Array}
+    		 * @api public
+    		 */
+    		EventEmitter.prototype.eventNames = function eventNames() {
+    		  var names = []
+    		    , events
+    		    , name;
+
+    		  if (this._eventsCount === 0) return names;
+
+    		  for (name in (events = this._events)) {
+    		    if (has.call(events, name)) names.push(prefix ? name.slice(1) : name);
+    		  }
+
+    		  if (Object.getOwnPropertySymbols) {
+    		    return names.concat(Object.getOwnPropertySymbols(events));
+    		  }
+
+    		  return names;
+    		};
+
+    		/**
+    		 * Return the listeners registered for a given event.
+    		 *
+    		 * @param {String|Symbol} event The event name.
+    		 * @param {Boolean} exists Only check if there are listeners.
+    		 * @returns {Array|Boolean}
+    		 * @api public
+    		 */
+    		EventEmitter.prototype.listeners = function listeners(event, exists) {
+    		  var evt = prefix ? prefix + event : event
+    		    , available = this._events[evt];
+
+    		  if (exists) return !!available;
+    		  if (!available) return [];
+    		  if (available.fn) return [available.fn];
+
+    		  for (var i = 0, l = available.length, ee = new Array(l); i < l; i++) {
+    		    ee[i] = available[i].fn;
+    		  }
+
+    		  return ee;
+    		};
+
+    		/**
+    		 * Calls each of the listeners registered for a given event.
+    		 *
+    		 * @param {String|Symbol} event The event name.
+    		 * @returns {Boolean} `true` if the event had listeners, else `false`.
+    		 * @api public
+    		 */
+    		EventEmitter.prototype.emit = function emit(event, a1, a2, a3, a4, a5) {
+    		  var evt = prefix ? prefix + event : event;
+
+    		  if (!this._events[evt]) return false;
+
+    		  var listeners = this._events[evt]
+    		    , len = arguments.length
+    		    , args
+    		    , i;
+
+    		  if (listeners.fn) {
+    		    if (listeners.once) this.removeListener(event, listeners.fn, undefined, true);
+
+    		    switch (len) {
+    		      case 1: return listeners.fn.call(listeners.context), true;
+    		      case 2: return listeners.fn.call(listeners.context, a1), true;
+    		      case 3: return listeners.fn.call(listeners.context, a1, a2), true;
+    		      case 4: return listeners.fn.call(listeners.context, a1, a2, a3), true;
+    		      case 5: return listeners.fn.call(listeners.context, a1, a2, a3, a4), true;
+    		      case 6: return listeners.fn.call(listeners.context, a1, a2, a3, a4, a5), true;
+    		    }
+
+    		    for (i = 1, args = new Array(len -1); i < len; i++) {
+    		      args[i - 1] = arguments[i];
+    		    }
+
+    		    listeners.fn.apply(listeners.context, args);
+    		  } else {
+    		    var length = listeners.length
+    		      , j;
+
+    		    for (i = 0; i < length; i++) {
+    		      if (listeners[i].once) this.removeListener(event, listeners[i].fn, undefined, true);
+
+    		      switch (len) {
+    		        case 1: listeners[i].fn.call(listeners[i].context); break;
+    		        case 2: listeners[i].fn.call(listeners[i].context, a1); break;
+    		        case 3: listeners[i].fn.call(listeners[i].context, a1, a2); break;
+    		        case 4: listeners[i].fn.call(listeners[i].context, a1, a2, a3); break;
+    		        default:
+    		          if (!args) for (j = 1, args = new Array(len -1); j < len; j++) {
+    		            args[j - 1] = arguments[j];
+    		          }
+
+    		          listeners[i].fn.apply(listeners[i].context, args);
+    		      }
+    		    }
+    		  }
+
+    		  return true;
+    		};
+
+    		/**
+    		 * Add a listener for a given event.
+    		 *
+    		 * @param {String|Symbol} event The event name.
+    		 * @param {Function} fn The listener function.
+    		 * @param {Mixed} [context=this] The context to invoke the listener with.
+    		 * @returns {EventEmitter} `this`.
+    		 * @api public
+    		 */
+    		EventEmitter.prototype.on = function on(event, fn, context) {
+    		  var listener = new EE(fn, context || this)
+    		    , evt = prefix ? prefix + event : event;
+
+    		  if (!this._events[evt]) this._events[evt] = listener, this._eventsCount++;
+    		  else if (!this._events[evt].fn) this._events[evt].push(listener);
+    		  else this._events[evt] = [this._events[evt], listener];
+
+    		  return this;
+    		};
+
+    		/**
+    		 * Add a one-time listener for a given event.
+    		 *
+    		 * @param {String|Symbol} event The event name.
+    		 * @param {Function} fn The listener function.
+    		 * @param {Mixed} [context=this] The context to invoke the listener with.
+    		 * @returns {EventEmitter} `this`.
+    		 * @api public
+    		 */
+    		EventEmitter.prototype.once = function once(event, fn, context) {
+    		  var listener = new EE(fn, context || this, true)
+    		    , evt = prefix ? prefix + event : event;
+
+    		  if (!this._events[evt]) this._events[evt] = listener, this._eventsCount++;
+    		  else if (!this._events[evt].fn) this._events[evt].push(listener);
+    		  else this._events[evt] = [this._events[evt], listener];
+
+    		  return this;
+    		};
+
+    		/**
+    		 * Remove the listeners of a given event.
+    		 *
+    		 * @param {String|Symbol} event The event name.
+    		 * @param {Function} fn Only remove the listeners that match this function.
+    		 * @param {Mixed} context Only remove the listeners that have this context.
+    		 * @param {Boolean} once Only remove one-time listeners.
+    		 * @returns {EventEmitter} `this`.
+    		 * @api public
+    		 */
+    		EventEmitter.prototype.removeListener = function removeListener(event, fn, context, once) {
+    		  var evt = prefix ? prefix + event : event;
+
+    		  if (!this._events[evt]) return this;
+    		  if (!fn) {
+    		    if (--this._eventsCount === 0) this._events = new Events();
+    		    else delete this._events[evt];
+    		    return this;
+    		  }
+
+    		  var listeners = this._events[evt];
+
+    		  if (listeners.fn) {
+    		    if (
+    		         listeners.fn === fn
+    		      && (!once || listeners.once)
+    		      && (!context || listeners.context === context)
+    		    ) {
+    		      if (--this._eventsCount === 0) this._events = new Events();
+    		      else delete this._events[evt];
+    		    }
+    		  } else {
+    		    for (var i = 0, events = [], length = listeners.length; i < length; i++) {
+    		      if (
+    		           listeners[i].fn !== fn
+    		        || (once && !listeners[i].once)
+    		        || (context && listeners[i].context !== context)
+    		      ) {
+    		        events.push(listeners[i]);
+    		      }
+    		    }
+
+    		    //
+    		    // Reset the array, or remove it completely if we have no more listeners.
+    		    //
+    		    if (events.length) this._events[evt] = events.length === 1 ? events[0] : events;
+    		    else if (--this._eventsCount === 0) this._events = new Events();
+    		    else delete this._events[evt];
+    		  }
+
+    		  return this;
+    		};
+
+    		/**
+    		 * Remove all listeners, or those of the specified event.
+    		 *
+    		 * @param {String|Symbol} [event] The event name.
+    		 * @returns {EventEmitter} `this`.
+    		 * @api public
+    		 */
+    		EventEmitter.prototype.removeAllListeners = function removeAllListeners(event) {
+    		  var evt;
+
+    		  if (event) {
+    		    evt = prefix ? prefix + event : event;
+    		    if (this._events[evt]) {
+    		      if (--this._eventsCount === 0) this._events = new Events();
+    		      else delete this._events[evt];
+    		    }
+    		  } else {
+    		    this._events = new Events();
+    		    this._eventsCount = 0;
+    		  }
+
+    		  return this;
+    		};
+
+    		//
+    		// Alias methods names because people roll like that.
+    		//
+    		EventEmitter.prototype.off = EventEmitter.prototype.removeListener;
+    		EventEmitter.prototype.addListener = EventEmitter.prototype.on;
+
+    		//
+    		// This function doesn't apply anymore.
+    		//
+    		EventEmitter.prototype.setMaxListeners = function setMaxListeners() {
+    		  return this;
+    		};
+
+    		//
+    		// Expose the prefix.
+    		//
+    		EventEmitter.prefixed = prefix;
+
+    		//
+    		// Allow `EventEmitter` to be imported as module namespace.
+    		//
+    		EventEmitter.EventEmitter = EventEmitter;
+
+    		//
+    		// Expose the module.
+    		//
+    		{
+    		  module.exports = EventEmitter;
+    		} 
+    	} (eventemitter3));
+    	return eventemitter3.exports;
+    }
+
+    var eventemitter3Exports = requireEventemitter3();
+
+    const Utils = {
+        vars: {
+            A: {},
+            isMobile: false,
+            shouldSetInitialData: true
+        },
+        BrilaFactory: BrilaFactory,
+        VSEPlayer: VSEPlayer,
+        BrilaShim: BrilaShim,
+        PlayerPromiseShim: PlayerPromiseShim,
+        guid: guid,
+        PostMetric: postMetric,
+        AuiUtils: auiUtils,
+        RefTagRecorder: RefTagRecorder,
+        InvalidArgumentsException: InvalidArgumentsException,
+        gatedP: gatedP,
+        auiUtils: auiUtils,
+        metricUtils: metricUtils,
+        postMetric: postMetric,
+        closedCaptionsUtils: closedCaptionsUtils,
+        EventEmitter: eventemitter3Exports.EventEmitter,
+        OnSiteAttributionMetrics: OnSiteAttributionMetrics,
+        setInitialData: (player, playerConfig) => {
+            if (playerConfig.initialVideo) {
+                if (playerConfig.alwaysSetInitialVideo) {
+                    player.setInitialData(playerConfig.initialVideo);
+                }
+                else if (Utils.vars.shouldSetInitialData) {
+                    player.setInitialData(playerConfig.initialVideo);
+                    Utils.vars.shouldSetInitialData = false;
+                }
+            }
+        },
+        defaultIfNotPresented: (obj, defaultValue) => {
+            return obj === undefined ? defaultValue : obj;
+        }
+    };
+
+    /*
+     * Copyright (c) 2018 Amazon.com, Inc. All rights reserved.
+     */
+    class Constants {
+    }
+    Constants.PLAYER_PAGE_STATE_NOT_FOUND_ERROR_KEY = 'VSEPlayerFailedToRenderNoPageState';
+    Constants.EMPTY_STRING = "";
+
+    try {
+        const vseLightPlayerClientGatedRegistration = (promise) => {
+            return new promise(function (resolve, reject) {
+                P.when('A', 'ready').register('VSEPlayer', function (A) {
+                    let playerFactory;
+                    Utils.vars.A = A;
+                    const getPlayer = (brilaFactory, playerConfig, clientPrefix) => {
+                        let player = brilaFactory.create(playerConfig);
+                        player.on('playbackComplete', () => {
+                            Utils.vars.A.trigger(`vsePlayer-${clientPrefix}-playbackComplete`);
+                        });
+                        player.on('loadeddata', () => {
+                            Utils.vars.A.trigger(`vsePlayer-${clientPrefix}-playerLoaded`);
+                            if (playerConfig.shouldPreload) {
+                                Utils.setInitialData(player, playerConfig);
+                            }
+                        });
+                        let initializedData = false;
+                        if (!playerConfig.shouldPreload) {
+                            Utils.vars.A.$("#" + playerConfig.containerId).one("click touchend", () => {
+                                //A long-press registers as both touch and clickend, which could 
+                                //fire this event twice and stall the player.
+                                if (initializedData)
+                                    return;
+                                initializedData = true;
+                                Utils.setInitialData(player, playerConfig);
+                            });
+                        }
+                        player.on('fullscreenchange', () => {
+                            Utils.vars.A.trigger(`vsePlayer-${clientPrefix}-fullscreenchange`);
+                        });
+                        player.on('playbackStart', () => {
+                            Utils.vars.A.trigger(`vsePlayer-${clientPrefix}-playbackStart`);
+                        });
+                        Utils.vars.A.on.orientationchange((orientationDetails) => {
+                            if (!auiUtils.isDefined(player)) {
+                                //If no player instance, then do nothing.
+                                return;
+                            }
+                            if (orientationDetails.orientation === 0) {
+                                Utils.vars.A.trigger(`vse:player:${clientPrefix}:portrait`);
+                            }
+                            else if (orientationDetails.orientation === 90) {
+                                Utils.vars.A.trigger(`vse:player:${clientPrefix}:landscape`);
+                            }
+                        });
+                        return player;
+                    };
+                    const InitializePlayer = function (pageStateName) {
+                        try {
+                            // Make sure on twister refresh we get the latest pageStates;
+                            const playerPageState = auiUtils.fetchLatestPageState(A, pageStateName);
+                            if (!playerPageState) {
+                                //If no pageState is found, record it and gracefully return - do nothing
+                                postMetric.count(Constants.PLAYER_PAGE_STATE_NOT_FOUND_ERROR_KEY, 1);
+                                Utils.vars.A.trigger(`vsePlayer-${pageStateName}-initialization-failed`);
+                                return;
+                            }
+                            const { awaConfig } = playerPageState;
+                            Utils.vars.isMobile = playerPageState.isMobile;
+                            const clientPrefix = playerPageState.clientPrefix;
+                            const contentId = awaConfig.initialVideo;
+                            const containerId = awaConfig.containerId;
+                            const libs = {
+                                gatedP, EventEmitter: eventemitter3Exports.EventEmitter, promise
+                            };
+                            //Initial Video to be played
+                            let _initialVideo = {
+                                videoUrl: playerPageState.videoUrl,
+                                contentId: contentId,
+                                vendorCode: playerPageState.vendorCode,
+                                // OSP parameters, defaulting to empty values, so that they don't trigger invalid value alarm for PlugAndPlay clients
+                                vendorTrackingId: Utils.defaultIfNotPresented(playerPageState.vendorTrackingId, Constants.EMPTY_STRING),
+                                productAsin: Utils.defaultIfNotPresented(playerPageState.productAsin, Constants.EMPTY_STRING),
+                                videoReferenceId: Utils.defaultIfNotPresented(playerPageState.videoReferenceId, Constants.EMPTY_STRING),
+                                closedCaptions: closedCaptionsUtils.getClosedCaptions(Utils.vars.A, playerPageState.initialClosedCaptions),
+                                eventTimestamp: Utils.vars.A.now(),
+                                imageUrl: playerPageState.imageUrl,
+                                //We don't have following data from client but these are required by AnyWhereAiry
+                                //So below are set to default values for now
+                                //TODO: Figure out the usage of these values in AnywhereAiry and remove if not necessary.
+                                duration: 0,
+                                refTag: Constants.EMPTY_STRING,
+                                rankingStrategy: Constants.EMPTY_STRING,
+                                aciContentId: playerPageState.aciContentId,
+                                mimeType: playerPageState.mimeType,
+                                videoTitle: playerPageState.videoTitle,
+                                altText: playerPageState.altText,
+                                creatorType: playerPageState.creatorType
+                            };
+                            let playerConfig = awaConfig;
+                            playerConfig.initialVideo = _initialVideo;
+                            //Create a playerFactory
+                            playerFactory = new BrilaFactory(libs);
+                            if (playerPageState.needPlayerFactory) {
+                                Utils.vars.A.trigger(`vsePlayerFactory-${clientPrefix}`, {
+                                    'playerFactory': playerFactory,
+                                    'playerConfig': playerConfig,
+                                    'metricFactory': {
+                                        'postMetric': postMetric,
+                                        'metricUtils': metricUtils
+                                    }
+                                });
+                            }
+                            else {
+                                const player = getPlayer(playerFactory, playerConfig, clientPrefix);
+                                if (!Utils.vars.A.objectIsEmpty(playerConfig.osaInstrumentationConfig)) {
+                                    const config = {
+                                        $container: Utils.vars.A.$(`#${containerId}`),
+                                        schemaId: playerConfig.osaInstrumentationConfig.schemaId,
+                                        producerId: playerConfig.osaInstrumentationConfig.producerId
+                                    };
+                                    new OnSiteAttributionMetrics(config, player, Utils.vars.A, false, clientPrefix);
+                                }
+                                Utils.vars.A.trigger(`vsePlayer-${clientPrefix}`, { 'player': player, 'containerId': containerId });
+                            }
+                        }
+                        catch (exception) {
+                            postMetric.logFatal('vse-ns', 'InitializeVSEPlayer', exception);
+                        }
+                    };
+                    return {
+                        initPlayer: InitializePlayer,
+                        Utils: Utils,
+                        // Strictly here just so we resolve the "Register" promise at the very last possible moment.
+                        _noneFeature: resolve()
+                    };
+                });
+            });
+        };
+        P.when('A', '3p-promise').execute('VSE-gatedP-register-player-client', (A, promise) => {
+            gatedP.register('VSEPlayer', 'VSEPlayer-client-registered', vseLightPlayerClientGatedRegistration, promise);
+        });
+    }
+    catch (exception) {
+        //This is to catch the double registration issues and log it as ERROR.
+        //Do not put any complicated logic here. If there's an exception thrown here
+        // our logs are all gone.
+        postMetric.logError('vse-ns', 'RegisterVSEPlayer', exception);
+    }
+
+})();
+/////////////////////////
+// END FILE js/bundle.js
+/////////////////////////
+// END ASSET VSEPlayer - 2.0
+}));
+////////////////////////////////////////////
